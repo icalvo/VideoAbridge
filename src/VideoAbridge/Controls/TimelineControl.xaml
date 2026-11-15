@@ -1,0 +1,19 @@
+<UserControl x:Class="VideoAbridge.Controls.TimelineControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             MinHeight="160"
+             Background="#1E1E1E">
+    <ScrollViewer x:Name="Scroller"
+                  HorizontalScrollBarVisibility="Auto"
+                  VerticalScrollBarVisibility="Disabled"
+                  PreviewMouseWheel="OnPreviewMouseWheel">
+        <Canvas x:Name="RootCanvas"
+                Height="160"
+                Background="#252526"
+                MouseLeftButtonDown="OnCanvasMouseLeftButtonDown"
+                MouseMove="OnCanvasMouseMove"
+                MouseLeftButtonUp="OnCanvasMouseLeftButtonUp"
+                MouseRightButtonDown="OnCanvasMouseRightButtonDown"
+                SizeChanged="OnCanvasSizeChanged"/>
+    </ScrollViewer>
+</UserControl>

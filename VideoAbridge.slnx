@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/VideoAbridge.Core/VideoAbridge.Core.csproj" />
+    <Project Path="src/VideoAbridge.FFmpeg/VideoAbridge.FFmpeg.csproj" />
+    <Project Path="src/VideoAbridge/VideoAbridge.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/VideoAbridge.Core.Tests/VideoAbridge.Core.Tests.csproj" />
+  </Folder>
+</Solution>

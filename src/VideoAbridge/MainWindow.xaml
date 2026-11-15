@@ -1,0 +1,111 @@
+﻿<Window x:Class="VideoAbridge.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
+        xmlns:controls="clr-namespace:VideoAbridge.Controls"
+        Title="VideoAbridge"
+        Height="820"
+        Width="1280"
+        MinHeight="600"
+        MinWidth="960"
+        Background="#2D2D30">
+    <DockPanel>
+        <Menu DockPanel.Dock="Top" Background="#3C3C3C" Foreground="White">
+            <MenuItem Header="_File">
+                <MenuItem Header="Open _Video…" Command="{Binding OpenVideoCommand}"/>
+                <MenuItem Header="Open _Project…" Command="{Binding OpenProjectCommand}"/>
+                <MenuItem Header="_Save Project…" Command="{Binding SaveProjectCommand}"/>
+                <Separator/>
+                <MenuItem Header="E_xport…" Command="{Binding ExportCommand}"/>
+                <MenuItem Header="Cancel Export" Command="{Binding CancelExportCommand}"/>
+            </MenuItem>
+            <MenuItem Header="_Edit">
+                <MenuItem Header="Add Marker at Playhead" Command="{Binding AddMarkerAtPlayheadCommand}"/>
+                <MenuItem Header="Remove Selected Marker" Command="{Binding RemoveSelectedMarkerCommand}"/>
+                <Separator/>
+                <MenuItem Header="Set Range Anchor" Command="{Binding SetRangeAnchorCommand}"/>
+                <MenuItem Header="Delete Between Anchor and Selection" Command="{Binding DeleteBetweenSelectionCommand}"/>
+                <MenuItem Header="Restore Between Anchor and Selection" Command="{Binding RestoreBetweenSelectionCommand}"/>
+                <Separator/>
+                <MenuItem Header="Detect Scenes Again" Command="{Binding DetectScenesCommand}"/>
+            </MenuItem>
+        </Menu>
+
+        <StatusBar DockPanel.Dock="Bottom" Background="#007ACC">
+            <StatusBarItem>
+                <TextBlock Text="{Binding StatusMessage}" Foreground="White"/>
+            </StatusBarItem>
+            <StatusBarItem HorizontalAlignment="Right">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding Playhead, StringFormat={}{0:hh\\:mm\\:ss\\.ff}}" Foreground="White" Margin="0,0,12,0"/>
+                    <ProgressBar Width="160" Height="12" Minimum="0" Maximum="1"
+                                 Value="{Binding ExportProgress}"/>
+                </StackPanel>
+            </StatusBarItem>
+        </StatusBar>
+
+        <Grid Margin="8">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" MinHeight="240"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="200" MinHeight="160"/>
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="280"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Row="0" Grid.Column="0" Background="Black" CornerRadius="2">
+                <vlc:VideoView x:Name="VideoView"/>
+            </Border>
+
+            <Border Grid.Row="0" Grid.Column="1" Background="#333337" Margin="8,0,0,0" Padding="12">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <TextBlock Text="Playback" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
+                        <Button Content="Play / Pause" Command="{Binding PlayPauseCommand}" Margin="0,0,0,12" Padding="8,4"/>
+
+                        <TextBlock Text="Zoom (Ctrl+Wheel on timeline)" Foreground="#CCC" Margin="0,0,0,4"/>
+                        <Slider Minimum="4" Maximum="200" Value="{Binding PixelsPerSecond}" Margin="0,0,0,16"/>
+
+                        <TextBlock Text="Selected join" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
+                        <TextBlock Foreground="#AAA" TextWrapping="Wrap" Margin="0,0,0,8"
+                                   Text="Click a Cut/XF label under a deleted section to select it."/>
+                        <Button Content="Hard Cut" Command="{Binding ApplyHardCutCommand}" Margin="0,0,0,6" Padding="8,4"/>
+                        <DockPanel Margin="0,0,0,4">
+                            <Button DockPanel.Dock="Right" Content="Apply XF" Command="{Binding ApplyCrossfadeCommand}" Padding="8,4" Margin="8,0,0,0"/>
+                            <TextBox Text="{Binding SelectedCrossfadeSeconds, UpdateSourceTrigger=PropertyChanged}"/>
+                        </DockPanel>
+                        <TextBlock Foreground="#AAA" Margin="0,0,0,16"
+                                   Text="{Binding SelectedCrossfadeCap, StringFormat=Max crossfade: {0:0.###}s}"/>
+
+                        <TextBlock Text="End fade to black" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
+                        <CheckBox Content="Enabled" IsChecked="{Binding FadeToBlackEnabled}" Foreground="White" Margin="0,0,0,6"/>
+                        <TextBox Text="{Binding FadeToBlackSeconds, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,6"/>
+                        <Button Content="Apply End Fade" Command="{Binding ApplyEndFadeCommand}" Padding="8,4"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+            <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,8">
+                <Button Content="Add Marker" Command="{Binding AddMarkerAtPlayheadCommand}" Margin="0,0,8,0" Padding="10,4"/>
+                <Button Content="Remove Marker" Command="{Binding RemoveSelectedMarkerCommand}" Margin="0,0,8,0" Padding="10,4"/>
+                <Button Content="Set Anchor" Command="{Binding SetRangeAnchorCommand}" Margin="0,0,8,0" Padding="10,4"/>
+                <Button Content="Delete Between" Command="{Binding DeleteBetweenSelectionCommand}" Margin="0,0,8,0" Padding="10,4"/>
+                <Button Content="Restore Between" Command="{Binding RestoreBetweenSelectionCommand}" Margin="0,0,8,0" Padding="10,4"/>
+                <Button Content="Delete Start→Sel" Command="{Binding DeleteFromStartToSelectionCommand}" Margin="0,0,8,0" Padding="10,4"/>
+                <Button Content="Delete Sel→End" Command="{Binding DeleteFromSelectionToEndCommand}" Margin="0,0,8,0" Padding="10,4"/>
+                <Button Content="Detect Scenes" Command="{Binding DetectScenesCommand}" Padding="10,4"/>
+            </StackPanel>
+
+            <controls:TimelineControl x:Name="Timeline"
+                                      Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2"
+                                      Timeline="{Binding Timeline}"
+                                      Playhead="{Binding Playhead}"
+                                      PixelsPerSecond="{Binding PixelsPerSecond, Mode=TwoWay}"
+                                      MarkerThumbs="{Binding MarkerThumbs}"
+                                      SelectedMarkerId="{Binding SelectedMarkerId, Mode=TwoWay}"
+                                      SelectedDeletedRunId="{Binding SelectedDeletedRunId, Mode=TwoWay}"/>
+        </Grid>
+    </DockPanel>
+</Window>
