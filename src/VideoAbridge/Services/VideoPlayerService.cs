@@ -1,11 +1,16 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.InteropServices;
 using LibVLCSharp.Shared;
 
 namespace VideoAbridge.Services;
 
-public sealed class VideoPlayerService : IDisposable
+internal sealed class VideoPlayerService : IDisposable
 {
+    // CA2213: disposed on a worker thread in Dispose — see DisposeOwnedVlcResources.
+    [SuppressMessage("Usage", "CA2213:Disposable fields should be disposed", Justification = "LibVLC Stop/Dispose on the UI thread deadlocks; owned resources are disposed in DisposeOwnedVlcResources via Task.Run.")]
     private readonly LibVLC _libVlc;
     private MediaPlayer? _mediaPlayer;
+    [SuppressMessage("Usage", "CA2213:Disposable fields should be disposed", Justification = "LibVLC Stop/Dispose on the UI thread deadlocks; owned resources are disposed in DisposeOwnedVlcResources via Task.Run.")]
     private Media? _media;
     private EventHandler<EventArgs>? _firstFrameHandler;
     private bool _userPaused;
@@ -55,8 +60,22 @@ public sealed class VideoPlayerService : IDisposable
 
     public void SetVolume(int volume0To100)
     {
-        try { MediaPlayer.Volume = Math.Clamp(volume0To100, 0, 100); }
-        catch { /* ignore */ }
+        try
+        {
+            MediaPlayer.Volume = Math.Clamp(volume0To100, 0, 100);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Ignore volume during teardown.
+        }
+        catch (InvalidOperationException)
+        {
+            // Ignore volume during teardown.
+        }
+        catch (COMException)
+        {
+            // Ignore volume during teardown.
+        }
     }
 
     public void Seek(TimeSpan time)
@@ -69,7 +88,15 @@ public sealed class VideoPlayerService : IDisposable
             {
                 MediaPlayer.Time = ms;
             }
-            catch
+            catch (ObjectDisposedException)
+            {
+                // Ignore seek failures from disposed/replaced media.
+            }
+            catch (InvalidOperationException)
+            {
+                // Ignore seek failures from disposed/replaced media.
+            }
+            catch (COMException)
             {
                 // Ignore seek failures from disposed/replaced media.
             }
@@ -108,29 +135,63 @@ public sealed class VideoPlayerService : IDisposable
 
     public void Dispose()
     {
-        var player = _mediaPlayer;
-        var media = _media;
-        var libVlc = _libVlc;
-        _mediaPlayer = null;
-        _media = null;
-
-        if (player is not null)
+        if (_mediaPlayer is not null)
         {
             if (_firstFrameHandler is not null)
-                player.Playing -= _firstFrameHandler;
+                _mediaPlayer.Playing -= _firstFrameHandler;
             _firstFrameHandler = null;
-            player.TimeChanged -= OnTimeChanged;
-            player.EndReached -= OnEndReached;
+            _mediaPlayer.TimeChanged -= OnTimeChanged;
+            _mediaPlayer.EndReached -= OnEndReached;
         }
 
         // Stop/Dispose on a worker thread — doing this on the UI thread deadlocks like Seek.
-        _ = Task.Run(() =>
+        _ = Task.Run(DisposeOwnedVlcResources);
+    }
+
+    private void DisposeOwnedVlcResources()
+    {
+        try
         {
-            try { player?.Stop(); } catch { /* ignore */ }
-            try { if (player is not null) player.Media = null; } catch { /* ignore */ }
-            try { player?.Dispose(); } catch { /* ignore */ }
-            try { media?.Dispose(); } catch { /* ignore */ }
-            try { libVlc.Dispose(); } catch { /* ignore */ }
-        });
+            _mediaPlayer?.Stop();
+        }
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { }
+        catch (COMException) { }
+
+        try
+        {
+            _mediaPlayer?.Media = null;
+        }
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { }
+        catch (COMException) { }
+
+        try
+        {
+            _mediaPlayer?.Dispose();
+        }
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { }
+        catch (COMException) { }
+
+        _mediaPlayer = null;
+
+        try
+        {
+            _media?.Dispose();
+        }
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { }
+        catch (COMException) { }
+
+        _media = null;
+
+        try
+        {
+            _libVlc.Dispose();
+        }
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { }
+        catch (COMException) { }
     }
 }

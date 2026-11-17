@@ -4,7 +4,7 @@ Windows WPF app for making abridged versions of existing videos: markers (includ
 
 ## Requirements
 
-- .NET 8 SDK
+- .NET 11 SDK
 - FFmpeg and ffprobe on `PATH` (or place `ffmpeg.exe` / `ffprobe.exe` under `tools/ffmpeg/` and copy them next to the app output)
 - Windows (LibVLC via `VideoLAN.LibVLC.Windows`)
 

@@ -21,7 +21,7 @@ public class PreviewComposerTests
     }
 
     [Fact]
-    public void Evaluate_InDeletedGap_JumpsToNextClipStart()
+    public void EvaluateInDeletedGapJumpsToNextClipStart()
     {
         var (plan, map) = HardCutPlan();
         var state = PreviewComposer.Evaluate(plan, map, TimeSpan.FromSeconds(15));
@@ -29,7 +29,7 @@ public class PreviewComposerTests
     }
 
     [Fact]
-    public void Evaluate_InSecondClip_DoesNotJumpBackToCut()
+    public void EvaluateInSecondClipDoesNotJumpBackToCut()
     {
         var (plan, map) = HardCutPlan();
         // Regression: earlier clip.End checks used to keep snapping back to 20s.
@@ -40,7 +40,7 @@ public class PreviewComposerTests
     }
 
     [Fact]
-    public void Evaluate_NearEndOfFirstClip_JumpsForward()
+    public void EvaluateNearEndOfFirstClipJumpsForward()
     {
         var (plan, map) = HardCutPlan();
         var state = PreviewComposer.Evaluate(plan, map, TimeSpan.FromSeconds(9.99));

@@ -6,7 +6,7 @@ namespace VideoAbridge.Core.Tests;
 public class AbridgedTimelineLayoutTests
 {
     [Fact]
-    public void FromPlan_MatchesPreviewTimeMapDuration_AndMapsJoins()
+    public void FromPlanMatchesPreviewTimeMapDurationAndMapsJoins()
     {
         var xfId = Guid.NewGuid();
         var cutId = Guid.NewGuid();
@@ -53,20 +53,20 @@ public class AbridgedTimelineLayoutTests
     }
 
     [Fact]
-    public void FromTimeline_AttachesInteriorDeletedRunIds()
+    public void FromTimelineAttachesInteriorDeletedRunIds()
     {
         var timeline = Timeline.Create(TimeSpan.FromSeconds(100));
-        timeline = timeline.AddMarker(TimeSpan.FromSeconds(10), MarkerSource.User).Value!;
-        timeline = timeline.AddMarker(TimeSpan.FromSeconds(20), MarkerSource.User).Value!;
-        timeline = timeline.AddMarker(TimeSpan.FromSeconds(30), MarkerSource.User).Value!;
-        timeline = timeline.AddMarker(TimeSpan.FromSeconds(40), MarkerSource.User).Value!;
+        timeline = timeline.AddMarker(TimeSpan.FromSeconds(10), MarkerSource.User).OkValue;
+        timeline = timeline.AddMarker(TimeSpan.FromSeconds(20), MarkerSource.User).OkValue;
+        timeline = timeline.AddMarker(TimeSpan.FromSeconds(30), MarkerSource.User).OkValue;
+        timeline = timeline.AddMarker(TimeSpan.FromSeconds(40), MarkerSource.User).OkValue;
 
-        timeline = timeline.DeleteBetween(timeline.Markers[0].Id, timeline.Markers[1].Id).Value!;
-        timeline = timeline.DeleteBetween(timeline.Markers[2].Id, timeline.Markers[3].Id).Value!;
+        timeline = timeline.DeleteBetween(timeline.Markers[0].Id, timeline.Markers[1].Id).OkValue;
+        timeline = timeline.DeleteBetween(timeline.Markers[2].Id, timeline.Markers[3].Id).OkValue;
 
         var runs = timeline.GetDeletedRuns().Where(r => r.IsInterior).ToList();
         runs.Should().HaveCount(2);
-        timeline = timeline.SetJoinCrossfade(runs[0].Id, 1.0).Value!;
+        timeline = timeline.SetJoinCrossfade(runs[0].Id, 1.0).OkValue;
 
         var layout = AbridgedTimelineLayout.FromTimeline(timeline);
         layout.Overlays.Should().Contain(o =>
@@ -76,7 +76,7 @@ public class AbridgedTimelineLayoutTests
     }
 
     [Fact]
-    public void FadeLongerThanDuration_IsClamped()
+    public void FadeLongerThanDurationIsClamped()
     {
         var plan = new ExportPlan(
             [new KeptClip(TimeSpan.FromSeconds(0), TimeSpan.FromSeconds(2))],

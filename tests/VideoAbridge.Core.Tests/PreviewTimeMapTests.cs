@@ -6,7 +6,7 @@ namespace VideoAbridge.Core.Tests;
 public class PreviewTimeMapTests
 {
     [Fact]
-    public void HardCut_MapsClipsSequentiallyAndJumpsDeletedGap()
+    public void HardCutMapsClipsSequentiallyAndJumpsDeletedGap()
     {
         var plan = new ExportPlan(
             [
@@ -31,7 +31,7 @@ public class PreviewTimeMapTests
     }
 
     [Fact]
-    public void Crossfade_SweepsSourceAcrossDeletedGap()
+    public void CrossfadeSweepsSourceAcrossDeletedGap()
     {
         var plan = new ExportPlan(
             [

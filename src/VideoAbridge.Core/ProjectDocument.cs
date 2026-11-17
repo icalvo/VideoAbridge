@@ -1,5 +1,7 @@
+using System.Collections.ObjectModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using static VideoAbridge.Core.Results;
 
 namespace VideoAbridge.Core;
 
@@ -7,50 +9,61 @@ public sealed class ProjectDocument
 {
     public string VideoPath { get; init; } = "";
     public double DurationSeconds { get; init; }
-    public List<MarkerDto> Markers { get; init; } = [];
-    public List<bool> SegmentDeleted { get; init; } = [];
-    public List<JoinDto> Joins { get; init; } = [];
+    public Collection<MarkerDto> Markers { get; init; } = [];
+    public Collection<bool> SegmentDeleted { get; init; } = [];
+    public Collection<JoinDto> Joins { get; init; } = [];
     public bool FadeFromBlackAtStart { get; init; }
     public double FadeFromBlackSeconds { get; init; }
     public bool FadeToBlackAtEnd { get; init; }
     public double FadeToBlackSeconds { get; init; }
 
-    public static ProjectDocument FromTimeline(string videoPath, Timeline timeline) => new()
+    public static ProjectDocument FromTimeline(string videoPath, Timeline timeline)
     {
-        VideoPath = videoPath,
-        DurationSeconds = timeline.Duration.TotalSeconds,
-        Markers = timeline.Markers.Select(m => new MarkerDto
+        ArgumentNullException.ThrowIfNull(timeline);
+
+        return new()
         {
-            Id = m.Id,
-            TimeSeconds = m.Time.TotalSeconds,
-            Source = m.Source.ToString()
-        }).ToList(),
-        SegmentDeleted = timeline.Segments.Select(s => s.IsDeleted).ToList(),
-        Joins = timeline.Joins.Select(j => new JoinDto
-        {
-            DeletedRunId = j.DeletedRunId,
-            Mode = j.Mode.ToString(),
-            CrossfadeSeconds = j.CrossfadeSeconds
-        }).ToList(),
-        FadeFromBlackAtStart = timeline.Settings.FadeFromBlackAtStart,
-        FadeFromBlackSeconds = timeline.Settings.FadeFromBlackSeconds,
-        FadeToBlackAtEnd = timeline.Settings.FadeToBlackAtEnd,
-        FadeToBlackSeconds = timeline.Settings.FadeToBlackSeconds
-    };
+            VideoPath = videoPath,
+            DurationSeconds = timeline.Duration.TotalSeconds,
+            Markers =
+            [
+                .. timeline.Markers.Select(m => new MarkerDto
+                {
+                    Id = m.Id,
+                    TimeSeconds = m.Time.TotalSeconds,
+                    Source = m.Source.ToString()
+                })
+            ],
+            SegmentDeleted = [.. timeline.Segments.Select(s => s.IsDeleted)],
+            Joins =
+            [
+                .. timeline.Joins.Select(j => new JoinDto
+                {
+                    DeletedRunId = j.DeletedRunId,
+                    Mode = j.Mode.ToString(),
+                    CrossfadeSeconds = j.CrossfadeSeconds
+                })
+            ],
+            FadeFromBlackAtStart = timeline.Settings.FadeFromBlackAtStart,
+            FadeFromBlackSeconds = timeline.Settings.FadeFromBlackSeconds,
+            FadeToBlackAtEnd = timeline.Settings.FadeToBlackAtEnd,
+            FadeToBlackSeconds = timeline.Settings.FadeToBlackSeconds
+        };
+    }
 
     public Result<(string VideoPath, Timeline Timeline)> ToTimeline()
     {
         if (DurationSeconds <= 0)
-            return Result<(string, Timeline)>.Fail("InvalidProject", "Duration must be positive.");
+            return Fail<(string, Timeline)>("InvalidProject", "Duration must be positive.");
 
         if (SegmentDeleted.Count != Markers.Count + 1)
-            return Result<(string, Timeline)>.Fail("InvalidProject", "Segment count must equal marker count + 1.");
+            return Fail<(string, Timeline)>("InvalidProject", "Segment count must equal marker count + 1.");
 
         var markers = new List<Marker>();
         foreach (var marker in Markers.OrderBy(m => m.TimeSeconds))
         {
             if (marker.TimeSeconds <= 0 || marker.TimeSeconds >= DurationSeconds)
-                return Result<(string, Timeline)>.Fail("InvalidProject", "Marker time out of range.");
+                return Fail<(string, Timeline)>("InvalidProject", "Marker time out of range.");
 
             if (!Enum.TryParse<MarkerSource>(marker.Source, out var source))
                 source = MarkerSource.User;
@@ -85,12 +98,12 @@ public sealed class ProjectDocument
         var interiorCount = timeline.GetDeletedRuns().Count(r => r.IsInterior);
         if (joins.Count != interiorCount)
         {
-            return Result<(string, Timeline)>.Fail(
+            return Fail<(string, Timeline)>(
                 "InvalidProject",
                 "Join count does not match interior deleted runs.");
         }
 
-        return Result<(string, Timeline)>.Ok((VideoPath, timeline));
+        return Ok((VideoPath, timeline));
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -109,12 +122,16 @@ public sealed class ProjectDocument
         {
             var doc = JsonSerializer.Deserialize<ProjectDocument>(json, JsonOptions);
             if (doc is null)
-                return Result<ProjectDocument>.Fail("InvalidProject", "Project file was empty.");
-            return Result<ProjectDocument>.Ok(doc);
+                return Fail<ProjectDocument>("InvalidProject", "Project file was empty.");
+            return Ok(doc);
         }
-        catch (Exception ex)
+        catch (JsonException ex)
         {
-            return Result<ProjectDocument>.Fail("InvalidProject", ex.Message);
+            return Fail<ProjectDocument>("InvalidProject", ex.Message);
+        }
+        catch (NotSupportedException ex)
+        {
+            return Fail<ProjectDocument>("InvalidProject", ex.Message);
         }
     }
 }

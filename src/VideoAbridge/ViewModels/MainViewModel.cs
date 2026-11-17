@@ -3,6 +3,8 @@ using System.Collections.Specialized;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -15,7 +17,7 @@ using VideoAbridge.Services;
 
 namespace VideoAbridge.ViewModels;
 
-public partial class MainViewModel : ObservableObject, IDisposable
+internal sealed partial class MainViewModel : ObservableObject, IDisposable
 {
     private readonly VideoPlayerService _player = new();
     private readonly MediaProbe _probe = new();
@@ -23,10 +25,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly ThumbnailExtractor _thumbnails = new();
     private readonly VideoExporter _exporter = new();
     private readonly MarkerCacheService _markerCache = new();
+    private readonly EditHistory _editHistory = new();
     private CancellationTokenSource? _exportCts;
     private CancellationTokenSource? _sceneDetectCts;
+    private bool _disposed;
     private int _thumbnailRefreshSuspendCount;
-    private int _sceneMarkersAdded;
     private TimeSpan _sceneDetectPosition;
     private DateTime _lastCachePersistUtc;
     private CancellationTokenSource? _thumbnailCts;
@@ -62,7 +65,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public bool ShowEditChrome => !IsPreviewMode;
 
-    public bool HasSelectedJoin => SelectedDeletedRunId is not null;
+    public bool HasSelectedJoin =>
+        SelectedDeletedRunId is Guid id
+        && Timeline?.GetDeletedRuns().FirstOrDefault(r => r.Id == id) is { IsInterior: true, Join: not null };
 
     public AbridgedTimelineLayout? AbridgedLayout => _abridgedLayout;
 
@@ -81,17 +86,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public ObservableCollection<Guid> SelectedMarkerIds { get; } = [];
     public ObservableCollection<LongTaskItem> Tasks { get; } = [];
 
-    /// <summary>Invoked by the view to show/activate the Tasks window.</summary>
-    public Action? RequestShowTasksWindow { get; set; }
+    [ObservableProperty] private bool _isTasksPaneOpen;
 
-    /// <summary>Invoked when there are no running tasks and no completed tasks with results.</summary>
-    public Action? RequestCloseTasksWindow { get; set; }
-
-    /// <summary>Invoked to focus the start-fade duration TextBox.</summary>
-    public Action? RequestFocusStartFade { get; set; }
-
-    /// <summary>Invoked to focus the end-fade duration TextBox.</summary>
-    public Action? RequestFocusEndFade { get; set; }
+    public bool ShowTasksPaneExpandButton => !IsTasksPaneOpen && HasTasksWorthShowing();
 
     public MainViewModel()
     {
@@ -139,6 +136,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         DeleteSectionFromBeginningCommand.NotifyCanExecuteChanged();
         DeleteSectionToEndCommand.NotifyCanExecuteChanged();
         DetectScenesCommand.NotifyCanExecuteChanged();
+        NotifyUndoRedoCommands();
+    }
+
+    private void NotifyUndoRedoCommands()
+    {
+        UndoCommand.NotifyCanExecuteChanged();
+        RedoCommand.NotifyCanExecuteChanged();
     }
 
     partial void OnTimelineChanged(Timeline? value)
@@ -185,24 +189,46 @@ public partial class MainViewModel : ObservableObject, IDisposable
         RefreshStatusBar();
     }
 
-    public void FocusStartFade() => RequestFocusStartFade?.Invoke();
-
-    public void FocusEndFade() => RequestFocusEndFade?.Invoke();
-
     partial void OnSelectedDeletedRunIdChanged(Guid? value)
     {
         OnPropertyChanged(nameof(HasSelectedJoin));
+        UndeleteSectionCommand.NotifyCanExecuteChanged();
         RefreshSelectionFromTimeline();
         RefreshStatusBar();
     }
 
-    [RelayCommand]
-    private void ShowTasks()
+    [RelayCommand(CanExecute = nameof(CanUndo))]
+    private void Undo()
     {
-        if (!HasTasksWorthShowing())
+        if (Timeline is null || !_editHistory.TryUndo(Timeline, out var previous))
             return;
-        RequestShowTasksWindow?.Invoke();
+
+        SetTimelineFromHistory(previous);
     }
+
+    private bool CanUndo() =>
+        Timeline is not null && _editHistory.CanUndo && !IsDetectingScenes;
+
+    [RelayCommand(CanExecute = nameof(CanRedo))]
+    private void Redo()
+    {
+        if (Timeline is null || !_editHistory.TryRedo(Timeline, out var next))
+            return;
+
+        SetTimelineFromHistory(next);
+    }
+
+    private bool CanRedo() =>
+        Timeline is not null && _editHistory.CanRedo && !IsDetectingScenes;
+
+    [RelayCommand]
+    private void ExpandTasksPane() => IsTasksPaneOpen = true;
+
+    [RelayCommand]
+    private void CollapseTasksPane() => IsTasksPaneOpen = false;
+
+    partial void OnIsTasksPaneOpenChanged(bool value) =>
+        OnPropertyChanged(nameof(ShowTasksPaneExpandButton));
 
     [RelayCommand]
     private async Task OpenVideoAsync()
@@ -214,7 +240,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (dialog.ShowDialog() != true)
             return;
 
-        await LoadVideoAsync(dialog.FileName, runSceneDetect: true);
+        await LoadVideoAsync(dialog.FileName, runSceneDetect: true).ConfigureAwait(true);
     }
 
     public Task OpenVideoPathAsync(string path) => LoadVideoAsync(path, runSceneDetect: true);
@@ -242,7 +268,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (_previewMap.AbridgedDuration > TimeSpan.Zero
                 && abridged >= _previewMap.AbridgedDuration - Timeline.MarkerEpsilon)
             {
-                var firstKept = Timeline.GetKeptRuns().FirstOrDefault()?.Start ?? TimeSpan.Zero;
+                var kept = Timeline.GetKeptRuns();
+                var firstKept = kept.Count > 0 ? kept[0].Start : TimeSpan.Zero;
                 SeekPlayhead(firstKept);
             }
             else if (!Timeline.IsKeptTime(Playhead))
@@ -277,11 +304,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         SelectedDeletedRunId = null;
 
-        if (SelectedMarkerIds.Contains(markerId))
-        {
-            SelectedMarkerIds.Remove(markerId);
+        if (SelectedMarkerIds.Remove(markerId))
             return;
-        }
 
         if (SelectedMarkerIds.Count >= 2)
         {
@@ -352,13 +376,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand(CanExecute = nameof(CanUndeleteSection))]
     private void UndeleteSection()
     {
-        if (Timeline is null || !TryGetOrderedSelectedMarkerIds(out var left, out var right))
+        if (Timeline is null)
+            return;
+
+        if (SelectedDeletedRunId is Guid runId)
+        {
+            Apply(Timeline.RestoreDeletedRun(runId));
+            SelectedDeletedRunId = null;
+            return;
+        }
+
+        if (!TryGetOrderedSelectedMarkerIds(out var left, out var right))
             return;
 
         Apply(Timeline.RestoreBetween(left, right));
     }
 
-    private bool CanUndeleteSection() => Timeline is not null && SelectedMarkerIds.Count == 2;
+    private bool CanUndeleteSection() =>
+        Timeline is not null
+        && (SelectedDeletedRunId is not null || SelectedMarkerIds.Count == 2);
 
     [RelayCommand(CanExecute = nameof(CanDeleteSectionFromBeginning))]
     private void DeleteSectionFromBeginning()
@@ -552,7 +588,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (VideoPath is null || Timeline is null || IsDetectingScenes)
             return;
 
-        await RunSceneDetectInBackgroundAsync(VideoPath, Timeline.Duration);
+        await RunSceneDetectInBackgroundAsync(VideoPath, Timeline.Duration).ConfigureAwait(true);
     }
 
     private bool CanDetectScenes() =>
@@ -579,8 +615,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (dialog.ShowDialog() != true)
             return;
 
-        _exportCts?.Cancel();
-        _exportCts?.Dispose();
+        if (_exportCts is not null)
+        {
+            await _exportCts.CancelAsync().ConfigureAwait(true);
+            _exportCts.Dispose();
+        }
+
         _exportCts = new CancellationTokenSource();
         IsExporting = true;
 
@@ -590,13 +630,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
         task.PrimaryActionLabel = "Open";
         task.PrimaryActionCommand = new RelayCommand(() => OpenExportedFile(outputPath));
         task.CanCancel = true;
-        task.CancelCommand = new RelayCommand(() => _exportCts?.Cancel());
+        task.CancelCommand = new AsyncRelayCommand(async () =>
+        {
+            if (_exportCts is not null)
+                await _exportCts.CancelAsync().ConfigureAwait(true);
+        });
         task.DismissCommand = new RelayCommand(() => DismissTask(task));
 
         try
         {
             var progress = new Progress<double>(p => task.Progress = p);
-            await _exporter.ExportAsync(VideoPath, outputPath, planResult.Value!, progress, _exportCts.Token);
+            await _exporter.ExportAsync(
+                VideoPath,
+                outputPath,
+                planResult.OkValue,
+                progress,
+                cancellationToken: _exportCts.Token).ConfigureAwait(true);
             task.Progress = 1;
             task.IsCompleted = true;
             task.CanCancel = false;
@@ -607,7 +656,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             RemoveTask(task);
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
+        {
+            RemoveTask(task);
+            ReportError(ex.Message);
+        }
+        catch (IOException ex)
+        {
+            RemoveTask(task);
+            ReportError(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
         {
             RemoveTask(task);
             ReportError(ex.Message);
@@ -616,12 +675,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             IsExporting = false;
         }
-    }
-
-    [RelayCommand]
-    private void CancelExport()
-    {
-        _exportCts?.Cancel();
     }
 
     public void SeekPlayhead(TimeSpan time)
@@ -780,7 +833,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             _player.Load(VideoPath);
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
+        {
+            ReportError(ex.Message);
+            IsPreviewMode = false;
+            return;
+        }
+        catch (ArgumentException ex)
+        {
+            ReportError(ex.Message);
+            IsPreviewMode = false;
+            return;
+        }
+        catch (IOException ex)
+        {
+            ReportError(ex.Message);
+            IsPreviewMode = false;
+            return;
+        }
+        catch (UnauthorizedAccessException ex)
         {
             ReportError(ex.Message);
             IsPreviewMode = false;
@@ -822,7 +893,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        _previewPlan = planResult.Value!;
+        _previewPlan = planResult.OkValue;
         _previewMap = PreviewTimeMap.FromPlan(_previewPlan);
         _abridgedLayout = AbridgedTimelineLayout.FromTimeline(Timeline);
         OnPropertyChanged(nameof(AbridgedLayout));
@@ -870,7 +941,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _secondaryPlayer.Load(VideoPath);
             _secondaryPlayer.SetVolume(0);
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
+        {
+            ReportError($"Preview secondary player failed: {ex.Message}");
+        }
+        catch (ArgumentException ex)
+        {
+            ReportError($"Preview secondary player failed: {ex.Message}");
+        }
+        catch (IOException ex)
+        {
+            ReportError($"Preview secondary player failed: {ex.Message}");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            ReportError($"Preview secondary player failed: {ex.Message}");
+        }
+        catch (COMException ex)
         {
             ReportError($"Preview secondary player failed: {ex.Message}");
         }
@@ -882,8 +969,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (_secondaryPlayer is null)
             return;
 
-        if (PreviewSecondaryFrame is null)
-            PreviewSecondaryFrame = _secondaryPlayer.Bitmap;
+        PreviewSecondaryFrame ??= _secondaryPlayer.Bitmap;
 
         _secondaryPlayer.Seek(sourceTime);
         if (play)
@@ -901,9 +987,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _secondaryPlayer?.Pause();
             _secondaryPlayer?.SetVolume(0);
         }
-        catch
+        catch (ObjectDisposedException)
         {
-            // ignore
+            // ignore teardown races
+        }
+        catch (InvalidOperationException)
+        {
+            // ignore teardown races
+        }
+        catch (COMException)
+        {
+            // ignore teardown races
         }
     }
 
@@ -924,14 +1018,36 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void Apply(Result<Timeline> result)
     {
-        if (!result.IsSuccess)
+        switch (result)
         {
-            ReportError(result.Error!.Value.Message);
-            return;
+            case DomainError error:
+                ReportError(error.Message);
+                return;
+            case Ok<Timeline> ok:
+                if (Timeline is not null)
+                    _editHistory.RecordBeforeChange(Timeline);
+                Timeline = ok.Value;
+                break;
+            default:
+                return;
         }
 
-        Timeline = result.Value;
         PruneSelectedMarkers();
+        NotifyTimelineActionCommands();
+        RefreshStatusBar();
+        PersistMarkerCache(force: true);
+    }
+
+    private void SetTimelineFromHistory(Timeline timeline)
+    {
+        Timeline = timeline;
+        PruneSelectedMarkers();
+        if (SelectedDeletedRunId is Guid runId
+            && Timeline.GetDeletedRuns().All(r => r.Id != runId))
+        {
+            SelectedDeletedRunId = null;
+        }
+
         NotifyTimelineActionCommands();
         RefreshStatusBar();
         PersistMarkerCache(force: true);
@@ -962,7 +1078,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void CancelSceneDetect()
     {
         // Cancel only; the in-flight run disposes the CTS in its finally block.
-        _sceneDetectCts?.Cancel();
+        // Sync path (RelayCommand / Dispose): block on CancelAsync to satisfy CA1849.
+        if (_sceneDetectCts is null)
+            return;
+        _sceneDetectCts.CancelAsync().GetAwaiter().GetResult();
     }
 
     private void SuspendThumbnailRefresh() => _thumbnailRefreshSuspendCount++;
@@ -974,23 +1093,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Scene-detect thumbs are added incrementally; skip a full rebuild here to avoid flicker.
     }
 
-    private void TryAddSceneMarker(TimeSpan time, string path, TimeSpan duration, CancellationToken cancellationToken)
+    private bool TryAddSceneMarker(TimeSpan time, string path, TimeSpan duration, CancellationToken cancellationToken)
     {
         if (Timeline is null)
-            return;
+            return false;
 
-        // Same skip rules as AddMarkers: ignore out-of-range / too-close without failing the run.
+        // Same skip rules as AddMarker: ignore out-of-range / too-close without failing the run.
         var id = Guid.NewGuid();
         var result = Timeline.AddMarker(time, MarkerSource.SceneDetect, id);
         if (!result.IsSuccess)
-            return;
+            return false;
 
-        Timeline = result.Value!;
-        _sceneMarkersAdded++;
+        Timeline = result.OkValue;
         if (time > _sceneDetectPosition)
             _sceneDetectPosition = time;
         PersistMarkerCache(force: false);
         _ = EnsureMarkerThumbnailAsync(id, time, path, duration, cancellationToken);
+        return true;
     }
 
     private void PersistMarkerCache(bool force)
@@ -1007,7 +1126,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             _markerCache.SaveFromTimeline(VideoPath, Timeline, _sceneDetectPosition);
         }
-        catch
+        catch (IOException)
+        {
+            // Cache persistence is best-effort.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Cache persistence is best-effort.
+        }
+        catch (JsonException)
         {
             // Cache persistence is best-effort.
         }
@@ -1038,7 +1165,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var segments = entry.SegmentDeleted is { Count: var n } && n == markers.Count + 1
             ? entry.SegmentDeleted
-            : Enumerable.Repeat(false, markers.Count + 1).ToList();
+            : [.. Enumerable.Repeat(false, markers.Count + 1)];
 
         // Pad/truncate joins so topology matches interior deleted runs (handles older/partial caches).
         var interiorCount = CountInteriorDeletedRuns(segments);
@@ -1057,9 +1184,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             VideoPath = path,
             DurationSeconds = timeline.Duration.TotalSeconds,
-            Markers = markers,
-            SegmentDeleted = segments,
-            Joins = joins,
+            Markers = [.. markers],
+            SegmentDeleted = [.. segments],
+            Joins = [.. joins],
             FadeFromBlackAtStart = entry.FadeFromBlackAtStart,
             FadeFromBlackSeconds = entry.FadeFromBlackSeconds,
             FadeToBlackAtEnd = entry.FadeToBlackAtEnd,
@@ -1070,21 +1197,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (!restored.IsSuccess)
             return timeline;
 
-        var restoredTimeline = restored.Value.Timeline;
+        var restoredTimeline = restored.OkValue.Timeline;
 
         // Clamp fades/crossfades against current kept-run caps.
         if (restoredTimeline.Settings.FadeFromBlackAtStart)
         {
             var r = restoredTimeline.SetStartFade(true, restoredTimeline.Settings.FadeFromBlackSeconds);
             if (r.IsSuccess)
-                restoredTimeline = r.Value!;
+                restoredTimeline = r.OkValue;
         }
 
         if (restoredTimeline.Settings.FadeToBlackAtEnd)
         {
             var r = restoredTimeline.SetEndFade(true, restoredTimeline.Settings.FadeToBlackSeconds);
             if (r.IsSuccess)
-                restoredTimeline = r.Value!;
+                restoredTimeline = r.OkValue;
         }
 
         foreach (var run in restoredTimeline.GetDeletedRuns().Where(r => r.IsInterior && r.Join is not null))
@@ -1093,7 +1220,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 continue;
             var r = restoredTimeline.SetJoinCrossfade(run.Id, run.Join.CrossfadeSeconds);
             if (r.IsSuccess)
-                restoredTimeline = r.Value!;
+                restoredTimeline = r.OkValue;
         }
 
         // Never resume before the last cached scene marker (covers older caches with a stale 0 position).
@@ -1104,7 +1231,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return restoredTimeline;
     }
 
-    private static int CountInteriorDeletedRuns(IReadOnlyList<bool> segmentDeleted)
+    private static int CountInteriorDeletedRuns(List<bool> segmentDeleted)
     {
         var count = 0;
         var i = 0;
@@ -1140,14 +1267,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
         string? after = null;
         try
         {
-            before = await _thumbnails.ExtractAsync(path, time, ThumbnailSide.Before, duration, cancellationToken);
-            after = await _thumbnails.ExtractAsync(path, time, ThumbnailSide.After, duration, cancellationToken);
+            before = await _thumbnails.ExtractAsync(path, time, ThumbnailSide.Before, duration, cancellationToken)
+                .ConfigureAwait(false);
+            after = await _thumbnails.ExtractAsync(path, time, ThumbnailSide.After, duration, cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
             return;
         }
-        catch
+        catch (IOException)
+        {
+            // ignore thumb failures
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // ignore thumb failures
+        }
+        catch (InvalidOperationException)
         {
             // ignore thumb failures
         }
@@ -1172,7 +1309,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (existing is not null)
                 MarkerThumbs.Remove(existing);
             MarkerThumbs.Add(thumb);
-        });
+        }).Task.ConfigureAwait(false);
     }
 
     private async Task RunSceneDetectInBackgroundAsync(string path, TimeSpan duration)
@@ -1188,8 +1325,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var cts = new CancellationTokenSource();
         _sceneDetectCts = cts;
-        _sceneMarkersAdded = 0;
+        var historyBefore = Timeline;
+        var markersAdded = 0;
         IsDetectingScenes = true;
+        NotifyUndoRedoCommands();
         // Suppress full rebuilds; thumbs for new scene markers are filled in as each cut arrives.
         SuspendThumbnailRefresh();
 
@@ -1209,7 +1348,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 if (cts.IsCancellationRequested || VideoPath != path)
                     return;
-                TryAddSceneMarker(time, path, duration, cts.Token);
+                if (TryAddSceneMarker(time, path, duration, cts.Token))
+                    markersAdded++;
             });
             var positions = new Progress<TimeSpan>(pos =>
             {
@@ -1227,7 +1367,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 progress: progress,
                 sceneFound: scenes,
                 positionReached: positions,
-                cancellationToken: cts.Token);
+                cancellationToken: cts.Token).ConfigureAwait(true);
 
             if (cts.IsCancellationRequested || VideoPath != path)
             {
@@ -1247,7 +1387,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
             PersistMarkerCache(force: true);
             RemoveTask(task);
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
+        {
+            PersistMarkerCache(force: true);
+            RemoveTask(task);
+            if (!cts.IsCancellationRequested)
+                ReportError(ex.Message);
+        }
+        catch (IOException ex)
+        {
+            PersistMarkerCache(force: true);
+            RemoveTask(task);
+            if (!cts.IsCancellationRequested)
+                ReportError(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
         {
             PersistMarkerCache(force: true);
             RemoveTask(task);
@@ -1256,6 +1410,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         finally
         {
+            // One undo step for the whole detect pass (including cancel after some markers).
+            if (markersAdded > 0 && historyBefore is not null)
+                _editHistory.RecordBeforeChange(historyBefore);
+
             ResumeThumbnailRefresh();
             if (ReferenceEquals(_sceneDetectCts, cts))
             {
@@ -1282,7 +1440,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             IsBusy = true;
             var fullPath = Path.GetFullPath(path);
-            var info = await _probe.ProbeAsync(fullPath);
+            var info = await _probe.ProbeAsync(fullPath).ConfigureAwait(true);
             duration = info.Duration;
             VideoPath = fullPath;
             _player.Load(fullPath);
@@ -1304,12 +1462,28 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Playhead = TimeSpan.Zero;
             ClearMarkerSelection();
             MarkerThumbs.Clear();
+            _editHistory.Clear();
             NotifyTimelineActionCommands();
             RefreshStatusBar();
             if (timeline.Markers.Count > 0)
                 _ = RefreshThumbnailsAsync();
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
+        {
+            ReportError(ex.Message);
+            return;
+        }
+        catch (IOException ex)
+        {
+            ReportError(ex.Message);
+            return;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            ReportError(ex.Message);
+            return;
+        }
+        catch (ArgumentException ex)
         {
             ReportError(ex.Message);
             return;
@@ -1319,8 +1493,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             IsBusy = false;
         }
 
-        if (runSceneDetect)
-            _ = RunSceneDetectInBackgroundAsync(VideoPath!, duration);
+        if (runSceneDetect && VideoPath is { } loadedPath)
+            _ = RunSceneDetectInBackgroundAsync(loadedPath, duration);
     }
 
     private LongTaskItem CreateTask(string title)
@@ -1332,7 +1506,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             HasResultActions = false
         };
         Tasks.Add(task);
-        RequestShowTasksWindow?.Invoke();
+        IsTasksPaneOpen = true;
+        OnPropertyChanged(nameof(ShowTasksPaneExpandButton));
         return task;
     }
 
@@ -1341,7 +1516,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         void Remove()
         {
             Tasks.Remove(task);
-            CloseTasksWindowIfIdle();
+            CollapseTasksPaneIfIdle();
         }
 
         if (Application.Current?.Dispatcher.CheckAccess() == true)
@@ -1357,11 +1532,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private bool HasTasksWorthShowing() => Tasks.Any(IsTaskWorthShowing);
 
-    private void CloseTasksWindowIfIdle()
+    private void CollapseTasksPaneIfIdle()
     {
+        OnPropertyChanged(nameof(ShowTasksPaneExpandButton));
         if (HasTasksWorthShowing())
             return;
-        RequestCloseTasksWindow?.Invoke();
+        IsTasksPaneOpen = false;
     }
 
     private static void OpenExportedFile(string path)
@@ -1424,8 +1600,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var run = Timeline.GetDeletedRuns().FirstOrDefault(r => r.Id == SelectedDeletedRunId);
             if (run is not null)
             {
+                var kind = run.IsInterior
+                    ? run.Join?.Mode == TransitionMode.Crossfade ? "XF" : "Cut"
+                    : run.Start <= TimeSpan.Zero && run.End >= Timeline.Duration
+                        ? "All"
+                        : run.Start <= TimeSpan.Zero ? "Begin" : "End";
                 parts.Add(
-                    $"Cut: {FormatTime(run.Start)} – {FormatTime(run.End)} (Δ {FormatTime(run.End - run.Start)})");
+                    $"{kind}: {FormatTime(run.Start)} – {FormatTime(run.End)} (Δ {FormatTime(run.End - run.Start)})");
             }
         }
 
@@ -1451,9 +1632,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var run = Timeline.GetDeletedRuns().FirstOrDefault(r => r.Id == SelectedDeletedRunId);
-        if (run is null || !run.IsInterior || run.Join is null)
+        if (run is null)
         {
             SelectedDeletedRunId = null;
+            return;
+        }
+
+        if (!run.IsInterior || run.Join is null)
+        {
+            SelectedCrossfadeCap = 0;
+            OnPropertyChanged(nameof(HasSelectedJoin));
             return;
         }
 
@@ -1469,6 +1657,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             _syncingSidebarUi = false;
         }
+
+        OnPropertyChanged(nameof(HasSelectedJoin));
     }
 
     private async Task RefreshThumbnailsAsync()
@@ -1476,8 +1666,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (Timeline is null || VideoPath is null)
             return;
 
-        _thumbnailCts?.Cancel();
-        _thumbnailCts?.Dispose();
+        if (_thumbnailCts is not null)
+        {
+            await _thumbnailCts.CancelAsync().ConfigureAwait(false);
+            _thumbnailCts.Dispose();
+        }
+
         var cts = new CancellationTokenSource();
         _thumbnailCts = cts;
 
@@ -1485,7 +1679,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var duration = Timeline.Duration;
         var markers = Timeline.Markers.ToList();
 
-        await Application.Current.Dispatcher.InvokeAsync(() => MarkerThumbs.Clear());
+        await Application.Current.Dispatcher.InvokeAsync(() => MarkerThumbs.Clear()).Task.ConfigureAwait(false);
 
         const int concurrency = 2;
         const int uiBatchSize = 8;
@@ -1510,7 +1704,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 {
                     throw;
                 }
-                catch
+                catch (IOException)
+                {
+                    // ignore thumb failures
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // ignore thumb failures
+                }
+                catch (InvalidOperationException)
                 {
                     // ignore thumb failures
                 }
@@ -1537,7 +1739,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 {
                     if (pendingUi.Count >= uiBatchSize)
                     {
-                        toFlush = pendingUi.ToList();
+                        toFlush = [.. pendingUi];
                         pendingUi.Clear();
                     }
                 }
@@ -1570,7 +1772,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             List<MarkerThumbViewModel> remaining;
             lock (pendingUi)
             {
-                remaining = pendingUi.ToList();
+                remaining = [.. pendingUi];
                 pendingUi.Clear();
             }
 
@@ -1613,25 +1815,67 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
-        CancelSceneDetect();
-        _thumbnailCts?.Cancel();
-        try { _thumbnailCts?.Dispose(); } catch { /* ignore */ }
-        _thumbnailCts = null;
-        EndCrossfadeVisuals();
-        _secondaryPlayer?.Dispose();
-        _secondaryPlayer = null;
-        _exportCts?.Cancel();
-        try
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
+    }
+
+    private void Dispose(bool disposing)
+    {
+        if (_disposed)
+            return;
+
+        if (disposing)
         {
-            _exportCts?.Dispose();
-        }
-        catch
-        {
-            // CTS may already be disposed by a finishing export.
+            CancelSceneDetect();
+            try
+            {
+                _sceneDetectCts?.Dispose();
+            }
+            catch (ObjectDisposedException)
+            {
+                // CTS may already be disposed by a finishing scene-detect run.
+            }
+
+            _sceneDetectCts = null;
+
+            if (_thumbnailCts is not null)
+            {
+                _thumbnailCts.CancelAsync().GetAwaiter().GetResult();
+                try
+                {
+                    _thumbnailCts.Dispose();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // ignore
+                }
+
+                _thumbnailCts = null;
+            }
+
+            EndCrossfadeVisuals();
+            _secondaryPlayer?.Dispose();
+            _secondaryPlayer = null;
+
+            if (_exportCts is not null)
+            {
+                _exportCts.CancelAsync().GetAwaiter().GetResult();
+                try
+                {
+                    _exportCts.Dispose();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // CTS may already be disposed by a finishing export.
+                }
+
+                _exportCts = null;
+            }
+
+            _player.Dispose();
         }
 
-        _exportCts = null;
-        _player.Dispose();
+        _disposed = true;
     }
 }
 

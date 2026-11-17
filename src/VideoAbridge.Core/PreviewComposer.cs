@@ -9,22 +9,15 @@ public static class PreviewComposer
     /// <summary>~1 frame at 24fps — avoid TimeSpan tick noise around cut boundaries.</summary>
     public const double FrameEpsilonSeconds = 1.0 / 24.0;
 
-    public readonly record struct VisualState(
-        TimeSpan PlayheadSourceTime,
-        TimeSpan AbridgedTime,
-        double BlackoutOpacity,
-        bool InCrossfade,
-        TimeSpan IncomingSourceTime,
-        double IncomingOpacity,
-        TimeSpan? JumpPrimaryTo,
-        bool PreviewComplete);
-
-    public static VisualState Evaluate(ExportPlan plan, PreviewTimeMap map, TimeSpan primarySourceTime)
+    public static PreviewVisualState Evaluate(ExportPlan plan, PreviewTimeMap map, TimeSpan primarySourceTime)
     {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(map);
+
         var clips = plan.Clips;
         if (clips.Count == 0)
         {
-            return new VisualState(
+            return new PreviewVisualState(
                 TimeSpan.Zero,
                 TimeSpan.Zero,
                 1,
@@ -70,7 +63,7 @@ public static class PreviewComposer
             {
                 var playhead = TimeSpan.FromSeconds(t);
                 var abridged = map.ToAbridged(playhead);
-                return new VisualState(
+                return new PreviewVisualState(
                     playhead,
                     abridged,
                     BlackoutOpacity(plan, abridged, total),
@@ -91,7 +84,7 @@ public static class PreviewComposer
                 var playhead = TimeSpan.FromSeconds(
                     clipEnd + u * (next.Start.TotalSeconds - clipEnd));
                 var abridged = map.ToAbridged(playhead);
-                return new VisualState(
+                return new PreviewVisualState(
                     playhead,
                     abridged,
                     BlackoutOpacity(plan, abridged, total),
@@ -108,7 +101,7 @@ public static class PreviewComposer
             if (i + 1 < clips.Count && t >= soloEnd - eps && t < nextPlayable - eps)
             {
                 var jumpTo = TimeSpan.FromSeconds(nextPlayable);
-                return new VisualState(
+                return new PreviewVisualState(
                     jumpTo,
                     map.ToAbridged(jumpTo),
                     BlackoutOpacity(plan, map.ToAbridged(jumpTo), total),
@@ -123,7 +116,7 @@ public static class PreviewComposer
             if (i + 1 >= clips.Count && t >= soloEnd - eps)
             {
                 var end = TimeSpan.FromSeconds(clipEnd);
-                return new VisualState(
+                return new PreviewVisualState(
                     end,
                     total,
                     BlackoutOpacity(plan, total, total),
@@ -141,7 +134,7 @@ public static class PreviewComposer
         if (t < firstPlayable - eps)
         {
             var jumpTo = TimeSpan.FromSeconds(firstPlayable);
-            return new VisualState(
+            return new PreviewVisualState(
                 jumpTo,
                 map.ToAbridged(jumpTo),
                 BlackoutOpacity(plan, map.ToAbridged(jumpTo), total),
@@ -154,7 +147,7 @@ public static class PreviewComposer
 
         // Fallback: already inside some kept region (tolerance) — don't jump.
         var playheadFallback = TimeSpan.FromSeconds(t);
-        return new VisualState(
+        return new PreviewVisualState(
             playheadFallback,
             map.ToAbridged(playheadFallback),
             BlackoutOpacity(plan, map.ToAbridged(playheadFallback), total),

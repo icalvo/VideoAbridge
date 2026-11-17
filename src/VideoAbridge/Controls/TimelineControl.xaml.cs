@@ -12,6 +12,16 @@ using VideoAbridge.ViewModels;
 
 namespace VideoAbridge.Controls;
 
+public sealed class TimeSpanEventArgs(TimeSpan time) : EventArgs
+{
+    public TimeSpan Time { get; } = time;
+}
+
+public sealed class GuidEventArgs(Guid id) : EventArgs
+{
+    public Guid Id { get; } = id;
+}
+
 public partial class TimelineControl : UserControl
 {
     public const double AbsoluteMaxPixelsPerSecond = 400;
@@ -61,6 +71,7 @@ public partial class TimelineControl : UserControl
     private Line? _playheadLine;
     private TimeSpan _fittedDuration = TimeSpan.Zero;
     private bool _updatingZoom;
+    private double _lastViewportWidth;
     private HashSet<Guid> _selectedMarkerSet = [];
     private readonly DispatcherTimer _thumbRedrawTimer = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private readonly List<(AbridgedOverlay Overlay, double Left, double Right)> _previewHitRegions = [];
@@ -73,10 +84,11 @@ public partial class TimelineControl : UserControl
             _thumbRedrawTimer.Stop();
             Redraw();
         };
+        SizeChanged += OnControlSizeChanged;
         Loaded += (_, _) =>
         {
-            Scroller.SizeChanged += OnScrollerSizeChanged;
             UpdateZoomBounds(forceFit: Timeline is not null);
+            _lastViewportWidth = GetViewportWidth();
         };
     }
 
@@ -140,9 +152,9 @@ public partial class TimelineControl : UserControl
         set => SetValue(AbridgedLayoutProperty, value);
     }
 
-    public event EventHandler<TimeSpan>? SeekRequested;
-    public event EventHandler<Guid>? MarkerClicked;
-    public event EventHandler<Guid>? DeletedRunSelected;
+    public event EventHandler<TimeSpanEventArgs>? SeekRequested;
+    public event EventHandler<GuidEventArgs>? MarkerClicked;
+    public event EventHandler<GuidEventArgs>? DeletedRunSelected;
     public event EventHandler? FadeInClicked;
     public event EventHandler? FadeOutClicked;
 
@@ -242,12 +254,57 @@ public partial class TimelineControl : UserControl
     private static void OnPlayheadChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) =>
         ((TimelineControl)d).UpdatePlayhead();
 
-    private void OnScrollerSizeChanged(object sender, SizeChangedEventArgs e)
+    private void OnControlSizeChanged(object sender, SizeChangedEventArgs e)
     {
         if (!e.WidthChanged)
             return;
-        UpdateZoomBounds(forceFit: false);
+
+        // ScrollViewer.ViewportWidth is often still stale inside SizeChanged during live
+        // window drags, so derive the new viewport from the control width ratio.
+        var oldViewport = _lastViewportWidth > 1 ? _lastViewportWidth : e.PreviousSize.Width;
+        var prevWidth = e.PreviousSize.Width > 1 ? e.PreviousSize.Width : oldViewport;
+        var newViewport = prevWidth > 1
+            ? oldViewport * (e.NewSize.Width / prevWidth)
+            : e.NewSize.Width;
+
+        if (newViewport <= 1 || DisplayDuration <= TimeSpan.Zero)
+        {
+            UpdateZoomBounds(forceFit: false, viewportWidth: newViewport);
+            Redraw();
+            _lastViewportWidth = newViewport > 1 ? newViewport : GetViewportWidth();
+            return;
+        }
+
+        var oldPps = Math.Max(PixelsPerSecond, 1e-9);
+        var visibleStartSeconds = oldViewport > 1 ? Scroller.HorizontalOffset / oldPps : 0;
+        var visibleDurationSeconds = oldViewport > 1 ? oldViewport / oldPps : DisplayDuration.TotalSeconds;
+
+        var durationSeconds = DisplayDuration.TotalSeconds;
+        var fit = durationSeconds > 0 ? newViewport / durationSeconds : 4;
+        var max = Math.Max(AbsoluteMaxPixelsPerSecond, fit);
+        var newPps = visibleDurationSeconds > 1e-9
+            ? Math.Clamp(newViewport / visibleDurationSeconds, fit, max)
+            : fit;
+
+        _updatingZoom = true;
+        try
+        {
+            MinPixelsPerSecond = fit;
+            MaxPixelsPerSecond = max;
+            PixelsPerSecond = newPps;
+            _fittedDuration = DisplayDuration;
+        }
+        finally
+        {
+            _updatingZoom = false;
+        }
+
         Redraw();
+        UpdateLayout();
+        Scroller.ScrollToHorizontalOffset(Math.Max(0, visibleStartSeconds * newPps));
+
+        // Keep the viewport we scaled against. ViewportWidth is often still stale mid-drag.
+        _lastViewportWidth = newViewport;
     }
 
     private void OnCanvasSizeChanged(object sender, SizeChangedEventArgs e)
@@ -272,22 +329,22 @@ public partial class TimelineControl : UserControl
         return 0;
     }
 
-    private double ComputeFitPixelsPerSecond()
+    private double ComputeFitPixelsPerSecond(double? viewportWidth = null)
     {
         var durationSeconds = DisplayDuration.TotalSeconds;
         if (durationSeconds <= 0)
             return 4;
 
-        var viewport = GetViewportWidth();
+        var viewport = viewportWidth is > 1 ? viewportWidth.Value : GetViewportWidth();
         if (viewport <= 1)
             return MinPixelsPerSecond > 0 ? MinPixelsPerSecond : 4;
 
         return viewport / durationSeconds;
     }
 
-    private void UpdateZoomBounds(bool forceFit)
+    private void UpdateZoomBounds(bool forceFit, double? viewportWidth = null)
     {
-        var fit = ComputeFitPixelsPerSecond();
+        var fit = ComputeFitPixelsPerSecond(viewportWidth);
         var max = Math.Max(AbsoluteMaxPixelsPerSecond, fit);
 
         _updatingZoom = true;
@@ -475,25 +532,26 @@ public partial class TimelineControl : UserControl
             RootCanvas.Children.Add(rect);
         }
 
-        foreach (var run in timeline.GetDeletedRuns().Where(r => r.IsInterior))
+        foreach (var run in timeline.GetDeletedRuns())
         {
             var left = run.Start.TotalSeconds * pps;
             var right = run.End.TotalSeconds * pps;
             var mid = (left + right) / 2;
+            var labelText = DeletedRunLabel(run, timeline.Duration);
             var label = new TextBlock
             {
-                Text = run.Join?.Mode == TransitionMode.Crossfade
-                    ? $"XF {run.Join.CrossfadeSeconds:0.##}s"
-                    : "Cut",
+                Text = labelText,
                 Foreground = Brushes.White,
                 FontSize = 10,
+                Cursor = Cursors.Hand,
                 Tag = run.Id
             };
-            Canvas.SetLeft(label, mid - 12);
+            // Approximate center using typical label width for short captions.
+            Canvas.SetLeft(label, mid - Math.Max(12, labelText.Length * 3.2));
             Canvas.SetTop(label, trackTop + trackHeight + 4);
             label.MouseLeftButtonDown += (_, e) =>
             {
-                DeletedRunSelected?.Invoke(this, run.Id);
+                DeletedRunSelected?.Invoke(this, new GuidEventArgs(run.Id));
                 SelectedDeletedRunId = run.Id;
                 e.Handled = true;
             };
@@ -516,7 +574,7 @@ public partial class TimelineControl : UserControl
             }
         }
 
-        var thumbs = MarkerThumbs?.ToDictionary(t => t.MarkerId) ?? new Dictionary<Guid, MarkerThumbViewModel>();
+        var thumbs = MarkerThumbs?.ToDictionary(t => t.MarkerId) ?? [];
         const double thumbWidth = 56;
         const double thumbHeight = 32;
         const double minGap = thumbWidth * 2 + 8;
@@ -559,7 +617,7 @@ public partial class TimelineControl : UserControl
             };
             line.MouseLeftButtonDown += (_, e) =>
             {
-                MarkerClicked?.Invoke(this, marker.Id);
+                MarkerClicked?.Invoke(this, new GuidEventArgs(marker.Id));
                 e.Handled = true;
             };
             RootCanvas.Children.Add(line);
@@ -576,7 +634,7 @@ public partial class TimelineControl : UserControl
             Canvas.SetTop(handle, trackTop + trackHeight - 5);
             handle.MouseLeftButtonDown += (_, e) =>
             {
-                MarkerClicked?.Invoke(this, marker.Id);
+                MarkerClicked?.Invoke(this, new GuidEventArgs(marker.Id));
                 e.Handled = true;
             };
             RootCanvas.Children.Add(handle);
@@ -626,13 +684,29 @@ public partial class TimelineControl : UserControl
         return (left, left + width);
     }
 
-    private static Brush OverlayBrush(AbridgedOverlayKind kind) => kind switch
+    private static string DeletedRunLabel(DeletedRun run, TimeSpan duration)
+    {
+        if (run.IsInterior)
+        {
+            return run.Join?.Mode == TransitionMode.Crossfade
+                ? $"XF {run.Join.CrossfadeSeconds:0.##}s"
+                : "Cut";
+        }
+
+        if (run.Start <= TimeSpan.Zero && run.End >= duration)
+            return "All";
+        if (run.Start <= TimeSpan.Zero)
+            return "Begin";
+        return "End";
+    }
+
+    private static SolidColorBrush OverlayBrush(AbridgedOverlayKind kind) => kind switch
     {
         AbridgedOverlayKind.FadeIn => CreateFrozenBrush(0x2E, 0x86, 0xAB),
         AbridgedOverlayKind.FadeOut => CreateFrozenBrush(0x2E, 0x86, 0xAB),
         AbridgedOverlayKind.Crossfade => CreateFrozenBrush(0xE0, 0x8A, 0x2E),
         AbridgedOverlayKind.Cut => CreateFrozenBrush(0xC4, 0x4E, 0x52),
-        _ => Brushes.Gray
+        _ => (SolidColorBrush)Brushes.Gray
     };
 
     private void HandleOverlayClick(AbridgedOverlay overlay)
@@ -649,9 +723,11 @@ public partial class TimelineControl : UserControl
             case AbridgedOverlayKind.Cut:
                 if (overlay.DeletedRunId is Guid id)
                 {
-                    DeletedRunSelected?.Invoke(this, id);
+                    DeletedRunSelected?.Invoke(this, new GuidEventArgs(id));
                     SelectedDeletedRunId = id;
                 }
+                break;
+            default:
                 break;
         }
     }
@@ -745,7 +821,7 @@ public partial class TimelineControl : UserControl
         }
 
         var time = TimeSpan.FromSeconds(Math.Clamp(pos.X / pps, 0, duration.TotalSeconds));
-        SeekRequested?.Invoke(this, time);
+        SeekRequested?.Invoke(this, new TimeSpanEventArgs(time));
     }
 
     private void OnCanvasMouseMove(object sender, MouseEventArgs e)

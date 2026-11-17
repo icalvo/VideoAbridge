@@ -8,7 +8,7 @@ namespace VideoAbridge.FFmpeg.Tests;
 public class VideoExporterTests
 {
     [Fact]
-    public void BuildFilterComplex_IncludesXfadeAndAcrossfade()
+    public void BuildFilterComplexIncludesXfadeAndAcrossfade()
     {
         var plan = new ExportPlan(
             [
@@ -33,7 +33,7 @@ public class VideoExporterTests
     }
 
     [Fact]
-    public void BuildFilterComplex_UsesConcatForHardCut()
+    public void BuildFilterComplexUsesConcatForHardCut()
     {
         var plan = new ExportPlan(
             [

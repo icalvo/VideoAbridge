@@ -43,6 +43,7 @@ public sealed class AbridgedTimelineLayout
         ExportPlan plan,
         IReadOnlyList<Guid>? joinDeletedRunIds = null)
     {
+        ArgumentNullException.ThrowIfNull(plan);
         if (plan.Clips.Count == 0)
             return Empty;
 
@@ -124,15 +125,15 @@ public sealed class AbridgedTimelineLayout
 
     public static AbridgedTimelineLayout FromTimeline(Timeline timeline)
     {
-        var planResult = timeline.TryBuildExportPlan();
-        if (!planResult.IsSuccess)
+        ArgumentNullException.ThrowIfNull(timeline);
+        if (timeline.TryBuildExportPlan() is not Ok<ExportPlan> plan)
             return Empty;
 
-        var runIds = timeline.GetDeletedRuns()
-            .Where(r => r.IsInterior)
-            .Select(r => r.Id)
-            .ToList();
+        List<Guid> runIds =
+        [
+            .. timeline.GetDeletedRuns().Where(r => r.IsInterior).Select(r => r.Id)
+        ];
 
-        return FromPlan(planResult.Value!, runIds);
+        return FromPlan(plan.Value, runIds);
     }
 }

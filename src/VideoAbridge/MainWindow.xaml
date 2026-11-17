@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
         xmlns:controls="clr-namespace:VideoAbridge.Controls"
+        xmlns:vm="clr-namespace:VideoAbridge.ViewModels"
         Title="VideoAbridge"
         Height="820"
         Width="1280"
@@ -12,6 +13,53 @@
         Icon="pack://application:,,,/Assets/VideoAbridge.ico">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+        <SolidColorBrush x:Key="ToolbarBtnDisabledBg" Color="#55555A"/>
+        <SolidColorBrush x:Key="ToolbarBtnDisabledFg" Color="#9A9A9E"/>
+        <Style x:Key="ToolbarButtonBase" TargetType="Button">
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="3"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.88"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.72"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource ToolbarBtnDisabledBg}"/>
+                                <Setter TargetName="Bd" Property="Opacity" Value="1"/>
+                                <Setter Property="Foreground" Value="{StaticResource ToolbarBtnDisabledFg}"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- Unsaturated blue / green / red for the three toolbar groups -->
+        <Style x:Key="ToolbarButtonBlue" TargetType="Button" BasedOn="{StaticResource ToolbarButtonBase}">
+            <Setter Property="Background" Value="#5C7A9E"/>
+        </Style>
+        <Style x:Key="ToolbarButtonGreen" TargetType="Button" BasedOn="{StaticResource ToolbarButtonBase}">
+            <Setter Property="Background" Value="#5C8A5C"/>
+        </Style>
+        <Style x:Key="ToolbarButtonRed" TargetType="Button" BasedOn="{StaticResource ToolbarButtonBase}">
+            <Setter Property="Background" Value="#9E5C5C"/>
+        </Style>
     </Window.Resources>
     <DockPanel>
         <Menu DockPanel.Dock="Top"
@@ -21,9 +69,11 @@
                 <MenuItem Header="Open _Video…" Command="{Binding OpenVideoCommand}"/>
                 <Separator/>
                 <MenuItem Header="E_xport…" Command="{Binding ExportCommand}"/>
-                <MenuItem Header="Cancel Export" Command="{Binding CancelExportCommand}"/>
             </MenuItem>
             <MenuItem Header="_Edit" IsEnabled="{Binding ShowEditChrome}">
+                <MenuItem Header="_Undo" Command="{Binding UndoCommand}" InputGestureText="Ctrl+Z"/>
+                <MenuItem Header="_Redo" Command="{Binding RedoCommand}" InputGestureText="Ctrl+Y"/>
+                <Separator/>
                 <MenuItem Header="Add Marker" Command="{Binding AddMarkerAtPlayheadCommand}"/>
                 <MenuItem Header="Delete Marker" Command="{Binding DeleteMarkerCommand}"/>
                 <Separator/>
@@ -33,9 +83,6 @@
                 <MenuItem Header="Delete Section to End" Command="{Binding DeleteSectionToEndCommand}"/>
                 <Separator/>
                 <MenuItem Header="Detect Scenes" Command="{Binding DetectScenesCommand}"/>
-            </MenuItem>
-            <MenuItem Header="_View">
-                <MenuItem Header="_Tasks" Command="{Binding ShowTasksCommand}"/>
             </MenuItem>
         </Menu>
 
@@ -55,11 +102,93 @@
                 <RowDefinition Height="200" MinHeight="160"/>
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="280"/>
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Row="0" Grid.Column="0" Background="Black" CornerRadius="2" ClipToBounds="True">
+            <!-- Tasks sidebar: only beside preview, not the timeline -->
+            <Border Grid.Row="0" Grid.Column="0"
+                    Width="280"
+                    Background="#333337"
+                    Margin="0,0,8,0"
+                    Padding="12"
+                    Visibility="{Binding IsTasksPaneOpen, Converter={StaticResource BoolToVis}}">
+                <DockPanel>
+                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                        <Button DockPanel.Dock="Right"
+                                Content="‹"
+                                ToolTip="Collapse"
+                                Padding="8,2"
+                                Command="{Binding CollapseTasksPaneCommand}"/>
+                        <TextBlock Text="Tasks" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center"/>
+                    </DockPanel>
+                    <ListBox ItemsSource="{Binding Tasks}"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             HorizontalContentAlignment="Stretch">
+                        <ListBox.Resources>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Padding" Value="0"/>
+                                <Setter Property="Margin" Value="0,0,0,10"/>
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                <Setter Property="Background" Value="Transparent"/>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ListBoxItem">
+                                            <ContentPresenter/>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListBox.Resources>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:LongTaskItem}">
+                                <Border Background="#2A2A2E" Padding="12" CornerRadius="2">
+                                    <DockPanel>
+                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top" Margin="8,0,0,0">
+                                            <Button Content="✕"
+                                                    ToolTip="Cancel"
+                                                    Padding="6,2"
+                                                    Command="{Binding CancelCommand}"
+                                                    Visibility="{Binding CanCancel, Converter={StaticResource BoolToVis}}"/>
+                                            <Button Content="✕"
+                                                    ToolTip="Dismiss"
+                                                    Padding="6,2"
+                                                    Command="{Binding DismissCommand}"
+                                                    Visibility="{Binding HasResultActions, Converter={StaticResource BoolToVis}}"/>
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Title}" Foreground="White" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                            <ProgressBar Height="14" Minimum="0" Maximum="1" Value="{Binding Progress}" Margin="0,8,0,0"/>
+                                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0"
+                                                        Visibility="{Binding HasResultActions, Converter={StaticResource BoolToVis}}">
+                                                <Button Content="{Binding PrimaryActionLabel}"
+                                                        Command="{Binding PrimaryActionCommand}"
+                                                        Padding="10,4"
+                                                        Margin="0,0,8,0"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+
+            <!-- Expand strip when pane collapsed but tasks are active -->
+            <Button Grid.Row="0" Grid.Column="0"
+                    Content="Tasks ›"
+                    ToolTip="Show tasks"
+                    Padding="6,8"
+                    Margin="0,0,8,0"
+                    VerticalAlignment="Top"
+                    Command="{Binding ExpandTasksPaneCommand}"
+                    Visibility="{Binding ShowTasksPaneExpandButton, Converter={StaticResource BoolToVis}}"/>
+
+            <Border Grid.Row="0" Grid.Column="1" Background="Black" CornerRadius="2" ClipToBounds="True">
                 <!-- Overlay lives inside VideoView Content so it sits above the Win32 video surface. -->
                 <vlc:VideoView x:Name="VideoView">
                     <Grid x:Name="PreviewHost"
@@ -67,12 +196,10 @@
                           MouseEnter="PreviewHost_MouseEnter"
                           MouseLeave="PreviewHost_MouseLeave"
                           MouseMove="PreviewHost_MouseMove">
-                        <!-- Realtime crossfade: secondary frames as WPF Image (opacity works; HWND does not). -->
                         <Image Source="{Binding PreviewSecondaryFrame}"
                                Stretch="Uniform"
                                Opacity="{Binding PreviewSecondaryOpacity}"
                                IsHitTestVisible="False"/>
-                        <!-- Realtime fade in/out from/to black -->
                         <Rectangle Fill="Black"
                                    Opacity="{Binding PreviewBlackoutOpacity}"
                                    IsHitTestVisible="False"/>
@@ -120,7 +247,7 @@
                 </vlc:VideoView>
             </Border>
 
-            <Border Grid.Row="0" Grid.Column="1" Background="#333337" Margin="8,0,0,0" Padding="12">
+            <Border Grid.Row="0" Grid.Column="2" Background="#333337" Margin="8,0,0,0" Padding="12">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
                         <StackPanel Margin="0,0,0,16"
@@ -128,43 +255,60 @@
                             <TextBlock Text="Crossfade (s)" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
                             <TextBlock Foreground="#AAA" TextWrapping="Wrap" Margin="0,0,0,8"
                                        Text="0 = hard cut. Click a Cut/XF on the timeline to select it."/>
-                            <TextBox Text="{Binding SelectedCrossfadeSeconds, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,4"/>
+                            <TextBox Text="{Binding SelectedCrossfadeSeconds, UpdateSourceTrigger=LostFocus}"
+                                     Margin="0,0,0,4"
+                                     KeyDown="DurationTextBox_KeyDown"/>
                             <TextBlock Foreground="#AAA"
                                        Text="{Binding SelectedCrossfadeCap, StringFormat=Max: {0:0.###}s}"/>
                         </StackPanel>
 
                         <TextBlock Text="Start fade from black (s)" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
                         <TextBox x:Name="StartFadeTextBox"
-                                 Text="{Binding FadeFromBlackSeconds, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,4"/>
+                                 Text="{Binding FadeFromBlackSeconds, UpdateSourceTrigger=LostFocus}"
+                                 Margin="0,0,0,4"
+                                 KeyDown="DurationTextBox_KeyDown"/>
                         <TextBlock Foreground="#AAA" Margin="0,0,0,16"
                                    Text="{Binding StartFadeCap, StringFormat=Max: {0:0.###}s}"/>
 
                         <TextBlock Text="End fade to black (s)" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
                         <TextBox x:Name="EndFadeTextBox"
-                                 Text="{Binding FadeToBlackSeconds, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,4"/>
+                                 Text="{Binding FadeToBlackSeconds, UpdateSourceTrigger=LostFocus}"
+                                 Margin="0,0,0,4"
+                                 KeyDown="DurationTextBox_KeyDown"/>
                         <TextBlock Foreground="#AAA"
                                    Text="{Binding EndFadeCap, StringFormat=Max: {0:0.###}s}"/>
                     </StackPanel>
                 </ScrollViewer>
             </Border>
 
-            <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,8">
-                <Button Content="{Binding PreviewModeToggleLabel}" Command="{Binding TogglePreviewModeCommand}" Margin="0,0,8,0" Padding="10,4"
-                        FontWeight="SemiBold"/>
+            <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,8">
+                <Button Content="{Binding PreviewModeToggleLabel}" Command="{Binding TogglePreviewModeCommand}"
+                        Style="{StaticResource ToolbarButtonBlue}"
+                        Margin="0,0,20,0" FontWeight="SemiBold"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,20,0"
+                            Visibility="{Binding ShowEditChrome, Converter={StaticResource BoolToVis}}">
+                    <Button Content="Add Marker" Command="{Binding AddMarkerAtPlayheadCommand}"
+                            Style="{StaticResource ToolbarButtonGreen}" Margin="0,0,8,0"/>
+                    <Button Content="Delete Marker" Command="{Binding DeleteMarkerCommand}"
+                            Style="{StaticResource ToolbarButtonGreen}" Margin="0,0,8,0"/>
+                    <Button Content="Detect Scenes" Command="{Binding DetectScenesCommand}"
+                            Style="{StaticResource ToolbarButtonGreen}"/>
+                </StackPanel>
                 <StackPanel Orientation="Horizontal"
                             Visibility="{Binding ShowEditChrome, Converter={StaticResource BoolToVis}}">
-                    <Button Content="Add Marker" Command="{Binding AddMarkerAtPlayheadCommand}" Margin="0,0,8,0" Padding="10,4"/>
-                    <Button Content="Delete Marker" Command="{Binding DeleteMarkerCommand}" Margin="0,0,8,0" Padding="10,4"/>
-                    <Button Content="Delete Section" Command="{Binding DeleteSectionCommand}" Margin="0,0,8,0" Padding="10,4"/>
-                    <Button Content="Undelete Section" Command="{Binding UndeleteSectionCommand}" Margin="0,0,8,0" Padding="10,4"/>
-                    <Button Content="Delete Section from Beginning" Command="{Binding DeleteSectionFromBeginningCommand}" Margin="0,0,8,0" Padding="10,4"/>
-                    <Button Content="Delete Section to End" Command="{Binding DeleteSectionToEndCommand}" Margin="0,0,8,0" Padding="10,4"/>
-                    <Button Content="Detect Scenes" Command="{Binding DetectScenesCommand}" Padding="10,4"/>
+                    <Button Content="Delete Section" Command="{Binding DeleteSectionCommand}"
+                            Style="{StaticResource ToolbarButtonRed}" Margin="0,0,8,0"/>
+                    <Button Content="Undelete Section" Command="{Binding UndeleteSectionCommand}"
+                            Style="{StaticResource ToolbarButtonRed}" Margin="0,0,8,0"/>
+                    <Button Content="Delete Section from Beginning" Command="{Binding DeleteSectionFromBeginningCommand}"
+                            Style="{StaticResource ToolbarButtonRed}" Margin="0,0,8,0"/>
+                    <Button Content="Delete Section to End" Command="{Binding DeleteSectionToEndCommand}"
+                            Style="{StaticResource ToolbarButtonRed}"/>
                 </StackPanel>
             </StackPanel>
 
             <controls:TimelineControl x:Name="Timeline"
-                                      Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2"
+                                      Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3"
                                       Timeline="{Binding Timeline}"
                                       Playhead="{Binding DisplayPlayhead}"
                                       IsPreviewMode="{Binding IsPreviewMode}"

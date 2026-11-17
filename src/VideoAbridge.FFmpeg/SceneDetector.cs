@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 
 namespace VideoAbridge.FFmpeg;
 
-public sealed class SceneDetector
+public sealed class SceneDetector(string? ffmpegPath = null)
 {
     /// <summary>Downscale width used before scoring; keeps hard-cut quality while cutting decode cost.</summary>
     public const int AnalysisWidth = 640;
@@ -15,13 +15,8 @@ public sealed class SceneDetector
         @"lavfi\.scd\.time:\s*(?<t>\d+(?:[.:]\d+)*)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    private readonly string _ffmpegPath;
-
-    public SceneDetector(string? ffmpegPath = null)
-    {
-        _ffmpegPath = ffmpegPath ?? FFmpegLocator.FindFFmpeg()
-            ?? throw new InvalidOperationException("ffmpeg was not found.");
-    }
+    private readonly string _ffmpegPath = ffmpegPath ?? FFmpegLocator.FindFFmpeg()
+        ?? throw new InvalidOperationException("ffmpeg was not found.");
 
     public async Task DetectAsync(
         string videoPath,
@@ -42,7 +37,7 @@ public sealed class SceneDetector
 
         // -ss BEFORE -i so decode/scdet actually starts at the cached position.
         // ( -ss after -i still feeds the filter from t=0 and only discards later.)
-        var args = new List<string> { "-hide_banner", "-an" };
+        List<string> args = ["-hide_banner", "-an"];
         if (startSeconds > 0.05)
         {
             args.Add("-ss");
@@ -66,7 +61,6 @@ public sealed class SceneDetector
         var result = await ProcessRunner.RunAsync(
             _ffmpegPath,
             args,
-            cancellationToken,
             line =>
             {
                 foreach (Match match in ScdTimeRegex.Matches(line))
@@ -89,7 +83,8 @@ public sealed class SceneDetector
                 }
 
                 ReportProgressFromTimeToken(progress, positionReached, line, totalSeconds, startSeconds);
-            }).ConfigureAwait(false);
+            },
+            cancellationToken).ConfigureAwait(false);
 
         // Fallback if line-splitting missed cuts (still report them live-style to the caller).
         if (seenMs.Count == 0)

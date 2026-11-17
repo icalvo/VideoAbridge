@@ -9,12 +9,12 @@ public static class FFmpegLocator
     private static string? FindTool(string windowsName, string unixName)
     {
         var baseDir = AppContext.BaseDirectory;
-        var candidates = new[]
-        {
+        string[] candidates =
+        [
             Path.Combine(baseDir, "ffmpeg", windowsName),
             Path.Combine(baseDir, "tools", "ffmpeg", windowsName),
             Path.Combine(baseDir, windowsName),
-        };
+        ];
 
         foreach (var path in candidates)
         {

@@ -3,7 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace VideoAbridge.ViewModels;
 
-public partial class LongTaskItem : ObservableObject
+internal sealed partial class LongTaskItem : ObservableObject
 {
     public Guid Id { get; } = Guid.NewGuid();
 

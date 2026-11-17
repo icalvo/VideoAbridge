@@ -1,27 +1,24 @@
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text;
 using VideoAbridge.Core;
 
 namespace VideoAbridge.FFmpeg;
 
-public sealed class VideoExporter
+public sealed class VideoExporter(string? ffmpegPath = null)
 {
-    private readonly string _ffmpegPath;
-
-    public VideoExporter(string? ffmpegPath = null)
-    {
-        _ffmpegPath = ffmpegPath ?? FFmpegLocator.FindFFmpeg()
-            ?? throw new InvalidOperationException("ffmpeg was not found.");
-    }
+    private readonly string _ffmpegPath = ffmpegPath ?? FFmpegLocator.FindFFmpeg()
+        ?? throw new InvalidOperationException("ffmpeg was not found.");
 
     public async Task ExportAsync(
         string inputPath,
         string outputPath,
         ExportPlan plan,
         IProgress<double>? progress = null,
-        CancellationToken cancellationToken = default,
-        ExportEncodeOptions? encodeOptions = null)
+        ExportEncodeOptions? encodeOptions = null,
+        CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(plan);
         if (plan.Clips.Count == 0)
             throw new ArgumentException("Export plan has no clips.", nameof(plan));
 
@@ -30,7 +27,6 @@ public sealed class VideoExporter
         var result = await ProcessRunner.RunAsync(
             _ffmpegPath,
             args,
-            cancellationToken,
             line =>
             {
                 // Best-effort progress from time= in stderr
@@ -46,7 +42,8 @@ public sealed class VideoExporter
                     if (total > 0)
                         progress?.Report(Math.Clamp(current.TotalSeconds / total, 0, 1));
                 }
-            }).ConfigureAwait(false);
+            },
+            cancellationToken).ConfigureAwait(false);
 
         if (!result.Success)
             throw new InvalidOperationException($"Export failed: {result.StandardError}");
@@ -54,19 +51,20 @@ public sealed class VideoExporter
         progress?.Report(1);
     }
 
-    public static List<string> BuildArguments(
+    public static Collection<string> BuildArguments(
         string inputPath,
         string outputPath,
         ExportPlan plan,
         ExportEncodeOptions? encodeOptions = null)
     {
+        ArgumentNullException.ThrowIfNull(plan);
         var options = encodeOptions ?? ExportEncodeOptions.Default;
-        var args = new List<string>
-        {
+        List<string> args =
+        [
             "-hide_banner",
             "-y",
             "-i", inputPath
-        };
+        ];
 
         // Stream-copy shortcut only for high-quality exports of a single trimmed clip.
         if (!options.ForceTranscode
@@ -83,7 +81,7 @@ public sealed class VideoExporter
                 "-c", "copy",
                 outputPath
             ]);
-            return args;
+            return [.. args];
         }
 
         var filter = BuildFilterComplex(plan);
@@ -100,11 +98,12 @@ public sealed class VideoExporter
             "-movflags", "+faststart",
             outputPath
         ]);
-        return args;
+        return [.. args];
     }
 
     public static string BuildFilterComplex(ExportPlan plan)
     {
+        ArgumentNullException.ThrowIfNull(plan);
         var sb = new StringBuilder();
         var n = plan.Clips.Count;
 

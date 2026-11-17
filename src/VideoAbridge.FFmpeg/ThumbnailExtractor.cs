@@ -67,7 +67,7 @@ public sealed class ThumbnailExtractor
                 "-y",
                 output
             ],
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken: cancellationToken).ConfigureAwait(false);
 
         return result.Success && File.Exists(output) ? output : null;
     }
@@ -79,7 +79,7 @@ public sealed class ThumbnailExtractor
     public string GetCachePath(string videoPath, TimeSpan seek, ThumbnailSide side)
     {
         var fullPath = Path.GetFullPath(videoPath);
-        var videoKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullPath))).ToLowerInvariant();
+        var videoKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullPath))).ToUpperInvariant();
         var fileName = $"{(long)Math.Round(seek.TotalMilliseconds)}_{side}.jpg";
         return Path.Combine(_cacheDirectory, videoKey, fileName);
     }

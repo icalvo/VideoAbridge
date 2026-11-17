@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
@@ -14,11 +15,15 @@ namespace VideoAbridge.Services;
 /// Secondary LibVLC player that renders into a <see cref="WriteableBitmap"/>
 /// so WPF opacity blending can show realtime crossfades over the primary HWND view.
 /// </summary>
-public sealed class FrameVideoPlayer : IDisposable
+internal sealed class FrameVideoPlayer : IDisposable
 {
+    // CA2213: disposed on a worker thread in Dispose — see DisposeOwnedVlcResources.
+    [SuppressMessage("Usage", "CA2213:Disposable fields should be disposed", Justification = "LibVLC Stop/Dispose on the UI thread deadlocks; owned resources are disposed in DisposeOwnedVlcResources via Task.Run.")]
     private readonly LibVLC _libVlc;
     private readonly Dispatcher _dispatcher;
+    [SuppressMessage("Usage", "CA2213:Disposable fields should be disposed", Justification = "LibVLC Stop/Dispose on the UI thread deadlocks; owned resources are disposed in DisposeOwnedVlcResources via Task.Run.")]
     private VlcMediaPlayer? _mediaPlayer;
+    [SuppressMessage("Usage", "CA2213:Disposable fields should be disposed", Justification = "LibVLC Stop/Dispose on the UI thread deadlocks; owned resources are disposed in DisposeOwnedVlcResources via Task.Run.")]
     private VlcMedia? _media;
     private WriteableBitmap? _bitmap;
     private byte[]? _buffer;
@@ -59,8 +64,22 @@ public sealed class FrameVideoPlayer : IDisposable
         var ms = (long)time.TotalMilliseconds;
         _ = Task.Run(() =>
         {
-            try { _mediaPlayer.Time = ms; }
-            catch { /* ignore */ }
+            try
+            {
+                _mediaPlayer.Time = ms;
+            }
+            catch (ObjectDisposedException)
+            {
+                // Ignore seek failures from disposed/replaced media.
+            }
+            catch (InvalidOperationException)
+            {
+                // Ignore seek failures from disposed/replaced media.
+            }
+            catch (COMException)
+            {
+                // Ignore seek failures from disposed/replaced media.
+            }
         });
     }
 
@@ -76,16 +95,44 @@ public sealed class FrameVideoPlayer : IDisposable
 
     public void Pause()
     {
-        try { _mediaPlayer?.SetPause(true); }
-        catch { /* ignore */ }
+        try
+        {
+            _mediaPlayer?.SetPause(true);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Ignore pause during teardown.
+        }
+        catch (InvalidOperationException)
+        {
+            // Ignore pause during teardown.
+        }
+        catch (COMException)
+        {
+            // Ignore pause during teardown.
+        }
     }
 
     public void SetVolume(int volume0To100)
     {
         if (_mediaPlayer is null)
             return;
-        try { _mediaPlayer.Volume = Math.Clamp(volume0To100, 0, 100); }
-        catch { /* ignore */ }
+        try
+        {
+            _mediaPlayer.Volume = Math.Clamp(volume0To100, 0, 100);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Ignore volume during teardown.
+        }
+        catch (InvalidOperationException)
+        {
+            // Ignore volume during teardown.
+        }
+        catch (COMException)
+        {
+            // Ignore volume during teardown.
+        }
     }
 
     private void EnsurePlayer()
@@ -164,9 +211,13 @@ public sealed class FrameVideoPlayer : IDisposable
                     0);
                 FrameUpdated?.Invoke(this, EventArgs.Empty);
             }
-            catch
+            catch (ObjectDisposedException)
             {
-                // ignore disposed bitmap races
+                // Ignore disposed bitmap races.
+            }
+            catch (InvalidOperationException)
+            {
+                // Ignore disposed bitmap races.
             }
         });
     }
@@ -182,21 +233,57 @@ public sealed class FrameVideoPlayer : IDisposable
             return;
         _disposed = true;
 
-        var player = _mediaPlayer;
-        var media = _media;
-        _mediaPlayer = null;
-        _media = null;
-
-        _ = Task.Run(() =>
-        {
-            try { player?.Stop(); } catch { /* ignore */ }
-            try { if (player is not null) player.Media = null; } catch { /* ignore */ }
-            try { player?.Dispose(); } catch { /* ignore */ }
-            try { media?.Dispose(); } catch { /* ignore */ }
-            try { _libVlc.Dispose(); } catch { /* ignore */ }
-        });
+        // Stop/Dispose on a worker thread — doing this on the UI thread deadlocks like Seek.
+        _ = Task.Run(DisposeOwnedVlcResources);
 
         if (_bufferHandle.IsAllocated)
             _bufferHandle.Free();
+    }
+
+    private void DisposeOwnedVlcResources()
+    {
+        try
+        {
+            _mediaPlayer?.Stop();
+        }
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { }
+        catch (COMException) { }
+
+        try
+        {
+            _mediaPlayer?.Media = null;
+        }
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { }
+        catch (COMException) { }
+
+        try
+        {
+            _mediaPlayer?.Dispose();
+        }
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { }
+        catch (COMException) { }
+
+        _mediaPlayer = null;
+
+        try
+        {
+            _media?.Dispose();
+        }
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { }
+        catch (COMException) { }
+
+        _media = null;
+
+        try
+        {
+            _libVlc.Dispose();
+        }
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { }
+        catch (COMException) { }
     }
 }

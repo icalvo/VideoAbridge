@@ -10,7 +10,7 @@ namespace VideoAbridge.Services;
 /// <summary>
 /// Per-video edit-state cache: markers, cuts, joins/crossfades, fades, and scene-detect progress.
 /// </summary>
-public sealed class MarkerCacheEntry
+internal sealed class MarkerCacheEntry
 {
     public string VideoPath { get; set; } = "";
     public double SceneDetectPositionSeconds { get; set; }
@@ -27,7 +27,7 @@ public sealed class MarkerCacheEntry
 /// <summary>
 /// Persists full timeline edit state keyed by the video file's full path.
 /// </summary>
-public sealed class MarkerCacheService
+internal sealed class MarkerCacheService
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -68,7 +68,15 @@ public sealed class MarkerCacheService
 
             return entry;
         }
-        catch
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+        catch (JsonException)
         {
             return null;
         }
@@ -76,6 +84,8 @@ public sealed class MarkerCacheService
 
     public void Save(MarkerCacheEntry entry)
     {
+        ArgumentNullException.ThrowIfNull(entry);
+
         var fullPath = Path.GetFullPath(entry.VideoPath);
         entry.VideoPath = fullPath;
         var file = GetCacheFilePath(fullPath);
@@ -94,9 +104,9 @@ public sealed class MarkerCacheService
             VideoPath = videoPath,
             SceneDetectPositionSeconds = Math.Max(0, sceneDetectPosition.TotalSeconds),
             DurationSeconds = doc.DurationSeconds,
-            Markers = doc.Markers,
-            SegmentDeleted = doc.SegmentDeleted,
-            Joins = doc.Joins,
+            Markers = [.. doc.Markers],
+            SegmentDeleted = [.. doc.SegmentDeleted],
+            Joins = [.. doc.Joins],
             FadeFromBlackAtStart = doc.FadeFromBlackAtStart,
             FadeFromBlackSeconds = doc.FadeFromBlackSeconds,
             FadeToBlackAtEnd = doc.FadeToBlackAtEnd,
@@ -107,7 +117,7 @@ public sealed class MarkerCacheService
 
     private string GetCacheFilePath(string fullVideoPath)
     {
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullVideoPath))).ToLowerInvariant();
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullVideoPath))).ToUpperInvariant();
         return Path.Combine(_cacheDirectory, hash + ".json");
     }
 

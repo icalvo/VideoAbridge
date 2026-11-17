@@ -20,6 +20,7 @@ public sealed class PreviewTimeMap
 
     public static PreviewTimeMap FromPlan(ExportPlan plan)
     {
+        ArgumentNullException.ThrowIfNull(plan);
         if (plan.Clips.Count == 0)
             return Empty;
 

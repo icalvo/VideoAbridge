@@ -5,15 +5,10 @@ namespace VideoAbridge.FFmpeg;
 
 public sealed record MediaInfo(TimeSpan Duration, int Width, int Height, double FrameRate);
 
-public sealed class MediaProbe
+public sealed class MediaProbe(string? ffprobePath = null)
 {
-    private readonly string _ffprobePath;
-
-    public MediaProbe(string? ffprobePath = null)
-    {
-        _ffprobePath = ffprobePath ?? FFmpegLocator.FindFFprobe()
-            ?? throw new InvalidOperationException("ffprobe was not found.");
-    }
+    private readonly string _ffprobePath = ffprobePath ?? FFmpegLocator.FindFFprobe()
+        ?? throw new InvalidOperationException("ffprobe was not found.");
 
     public async Task<MediaInfo> ProbeAsync(string videoPath, CancellationToken cancellationToken = default)
     {
@@ -26,7 +21,7 @@ public sealed class MediaProbe
                 "-show_streams",
                 videoPath
             ],
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken: cancellationToken).ConfigureAwait(false);
 
         if (!result.Success)
             throw new InvalidOperationException($"ffprobe failed: {result.StandardError}");

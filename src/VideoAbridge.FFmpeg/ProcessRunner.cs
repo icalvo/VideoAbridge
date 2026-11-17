@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 
@@ -16,9 +17,11 @@ public static class ProcessRunner
     public static async Task<ProcessResult> RunAsync(
         string fileName,
         IEnumerable<string> arguments,
-        CancellationToken cancellationToken = default,
-        Action<string>? onStdErrLine = null)
+        Action<string>? onStdErrLine = null,
+        CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(arguments);
+
         var psi = new ProcessStartInfo
         {
             FileName = fileName,
@@ -84,7 +87,15 @@ public static class ProcessRunner
             if (!process.HasExited)
                 process.Kill(entireProcessTree: true);
         }
-        catch
+        catch (InvalidOperationException)
+        {
+            // Best-effort cleanup when cancelling.
+        }
+        catch (NotSupportedException)
+        {
+            // Best-effort cleanup when cancelling.
+        }
+        catch (Win32Exception)
         {
             // Best-effort cleanup when cancelling.
         }
