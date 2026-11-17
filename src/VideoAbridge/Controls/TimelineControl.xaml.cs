@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Controls;
@@ -5,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using VideoAbridge.Core;
 using VideoAbridge.ViewModels;
 
@@ -12,9 +14,11 @@ namespace VideoAbridge.Controls;
 
 public partial class TimelineControl : UserControl
 {
+    public const double AbsoluteMaxPixelsPerSecond = 400;
+
     public static readonly DependencyProperty TimelineProperty =
         DependencyProperty.Register(nameof(Timeline), typeof(Timeline), typeof(TimelineControl),
-            new PropertyMetadata(null, OnVisualPropertyChanged));
+            new PropertyMetadata(null, OnTimelineChanged));
 
     public static readonly DependencyProperty PlayheadProperty =
         DependencyProperty.Register(nameof(Playhead), typeof(TimeSpan), typeof(TimelineControl),
@@ -22,27 +26,47 @@ public partial class TimelineControl : UserControl
 
     public static readonly DependencyProperty PixelsPerSecondProperty =
         DependencyProperty.Register(nameof(PixelsPerSecond), typeof(double), typeof(TimelineControl),
-            new PropertyMetadata(40.0, OnVisualPropertyChanged));
+            new FrameworkPropertyMetadata(40.0, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, OnPixelsPerSecondChanged));
+
+    public static readonly DependencyProperty MinPixelsPerSecondProperty =
+        DependencyProperty.Register(nameof(MinPixelsPerSecond), typeof(double), typeof(TimelineControl),
+            new FrameworkPropertyMetadata(4.0, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault));
+
+    public static readonly DependencyProperty MaxPixelsPerSecondProperty =
+        DependencyProperty.Register(nameof(MaxPixelsPerSecond), typeof(double), typeof(TimelineControl),
+            new FrameworkPropertyMetadata(AbsoluteMaxPixelsPerSecond, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault));
 
     public static readonly DependencyProperty MarkerThumbsProperty =
         DependencyProperty.Register(nameof(MarkerThumbs), typeof(IEnumerable<MarkerThumbViewModel>), typeof(TimelineControl),
             new PropertyMetadata(null, OnMarkerThumbsChanged));
 
-    public static readonly DependencyProperty SelectedMarkerIdProperty =
-        DependencyProperty.Register(nameof(SelectedMarkerId), typeof(Guid?), typeof(TimelineControl),
-            new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, OnVisualPropertyChanged));
+    public static readonly DependencyProperty SelectedMarkerIdsProperty =
+        DependencyProperty.Register(nameof(SelectedMarkerIds), typeof(IEnumerable), typeof(TimelineControl),
+            new PropertyMetadata(null, OnSelectedMarkerIdsChanged));
 
     public static readonly DependencyProperty SelectedDeletedRunIdProperty =
         DependencyProperty.Register(nameof(SelectedDeletedRunId), typeof(Guid?), typeof(TimelineControl),
             new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, OnVisualPropertyChanged));
 
     private Line? _playheadLine;
-    private Guid? _dragMarkerId;
-    private bool _dragging;
+    private TimeSpan _fittedDuration = TimeSpan.Zero;
+    private bool _updatingZoom;
+    private HashSet<Guid> _selectedMarkerSet = [];
+    private readonly DispatcherTimer _thumbRedrawTimer = new() { Interval = TimeSpan.FromMilliseconds(120) };
 
     public TimelineControl()
     {
         InitializeComponent();
+        _thumbRedrawTimer.Tick += (_, _) =>
+        {
+            _thumbRedrawTimer.Stop();
+            Redraw();
+        };
+        Loaded += (_, _) =>
+        {
+            Scroller.SizeChanged += OnScrollerSizeChanged;
+            UpdateZoomBounds(forceFit: Timeline is not null);
+        };
     }
 
     public Timeline? Timeline
@@ -63,16 +87,28 @@ public partial class TimelineControl : UserControl
         set => SetValue(PixelsPerSecondProperty, value);
     }
 
+    public double MinPixelsPerSecond
+    {
+        get => (double)GetValue(MinPixelsPerSecondProperty);
+        set => SetValue(MinPixelsPerSecondProperty, value);
+    }
+
+    public double MaxPixelsPerSecond
+    {
+        get => (double)GetValue(MaxPixelsPerSecondProperty);
+        set => SetValue(MaxPixelsPerSecondProperty, value);
+    }
+
     public IEnumerable<MarkerThumbViewModel>? MarkerThumbs
     {
         get => (IEnumerable<MarkerThumbViewModel>?)GetValue(MarkerThumbsProperty);
         set => SetValue(MarkerThumbsProperty, value);
     }
 
-    public Guid? SelectedMarkerId
+    public IEnumerable? SelectedMarkerIds
     {
-        get => (Guid?)GetValue(SelectedMarkerIdProperty);
-        set => SetValue(SelectedMarkerIdProperty, value);
+        get => (IEnumerable?)GetValue(SelectedMarkerIdsProperty);
+        set => SetValue(SelectedMarkerIdsProperty, value);
     }
 
     public Guid? SelectedDeletedRunId
@@ -82,12 +118,28 @@ public partial class TimelineControl : UserControl
     }
 
     public event EventHandler<TimeSpan>? SeekRequested;
-    public event EventHandler<Guid>? MarkerSelected;
+    public event EventHandler<Guid>? MarkerClicked;
     public event EventHandler<Guid>? DeletedRunSelected;
-    public event EventHandler<(Guid MarkerId, TimeSpan NewTime)>? MarkerMoved;
 
     private static void OnVisualPropertyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) =>
         ((TimelineControl)d).Redraw();
+
+    private static void OnTimelineChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        var control = (TimelineControl)d;
+        var newDuration = (e.NewValue as Timeline)?.Duration ?? TimeSpan.Zero;
+        var forceFit = newDuration != control._fittedDuration;
+        control.UpdateZoomBounds(forceFit);
+        control.Redraw();
+    }
+
+    private static void OnPixelsPerSecondChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        var control = (TimelineControl)d;
+        if (!control._updatingZoom)
+            control.ClampPixelsPerSecond();
+        control.Redraw();
+    }
 
     private static void OnMarkerThumbsChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
@@ -99,12 +151,122 @@ public partial class TimelineControl : UserControl
         control.Redraw();
     }
 
-    private void OnThumbCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) => Redraw();
+    private static void OnSelectedMarkerIdsChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        var control = (TimelineControl)d;
+        if (e.OldValue is INotifyCollectionChanged oldNc)
+            oldNc.CollectionChanged -= control.OnSelectedMarkerIdsCollectionChanged;
+        if (e.NewValue is INotifyCollectionChanged newNc)
+            newNc.CollectionChanged += control.OnSelectedMarkerIdsCollectionChanged;
+        control.RefreshSelectedMarkerSet();
+        control.Redraw();
+    }
+
+    private void OnThumbCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        // Batch redraws while thumbnails stream in after opening a cached project.
+        _thumbRedrawTimer.Stop();
+        _thumbRedrawTimer.Start();
+    }
+
+    private void OnSelectedMarkerIdsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        RefreshSelectedMarkerSet();
+        Redraw();
+    }
+
+    private void RefreshSelectedMarkerSet()
+    {
+        _selectedMarkerSet = SelectedMarkerIds?.OfType<Guid>().ToHashSet() ?? [];
+    }
 
     private static void OnPlayheadChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) =>
         ((TimelineControl)d).UpdatePlayhead();
 
-    private void OnCanvasSizeChanged(object sender, SizeChangedEventArgs e) => Redraw();
+    private void OnScrollerSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (!e.WidthChanged)
+            return;
+        UpdateZoomBounds(forceFit: false);
+        Redraw();
+    }
+
+    private void OnCanvasSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        // Layout-only; zoom bounds are driven by the scroller viewport.
+    }
+
+    private void SetCanvasWidth(double width)
+    {
+        RootCanvas.Width = width;
+        RootCanvas.MinWidth = width;
+        RootCanvas.InvalidateMeasure();
+        Scroller.InvalidateScrollInfo();
+    }
+
+    private double GetViewportWidth()
+    {
+        if (Scroller.ViewportWidth > 1)
+            return Scroller.ViewportWidth;
+        if (ActualWidth > 1)
+            return ActualWidth;
+        return 0;
+    }
+
+    private double ComputeFitPixelsPerSecond()
+    {
+        var durationSeconds = Timeline?.Duration.TotalSeconds ?? 0;
+        if (durationSeconds <= 0)
+            return 4;
+
+        var viewport = GetViewportWidth();
+        if (viewport <= 1)
+            return MinPixelsPerSecond > 0 ? MinPixelsPerSecond : 4;
+
+        return viewport / durationSeconds;
+    }
+
+    private void UpdateZoomBounds(bool forceFit)
+    {
+        var fit = ComputeFitPixelsPerSecond();
+        var max = Math.Max(AbsoluteMaxPixelsPerSecond, fit);
+
+        _updatingZoom = true;
+        try
+        {
+            MinPixelsPerSecond = fit;
+            MaxPixelsPerSecond = max;
+            _fittedDuration = Timeline?.Duration ?? TimeSpan.Zero;
+
+            if (forceFit || PixelsPerSecond < fit)
+                PixelsPerSecond = fit;
+            else if (PixelsPerSecond > max)
+                PixelsPerSecond = max;
+        }
+        finally
+        {
+            _updatingZoom = false;
+        }
+    }
+
+    private void ClampPixelsPerSecond()
+    {
+        var min = MinPixelsPerSecond;
+        var max = Math.Max(MaxPixelsPerSecond, min);
+        var clamped = Math.Clamp(PixelsPerSecond, min, max);
+        if (Math.Abs(clamped - PixelsPerSecond) < 0.0001)
+            return;
+
+        _updatingZoom = true;
+        try
+        {
+            PixelsPerSecond = clamped;
+        }
+        finally
+        {
+            _updatingZoom = false;
+        }
+    }
 
     private void Redraw()
     {
@@ -114,13 +276,14 @@ public partial class TimelineControl : UserControl
         var timeline = Timeline;
         if (timeline is null || timeline.Duration <= TimeSpan.Zero)
         {
-            RootCanvas.Width = 400;
+            SetCanvasWidth(Math.Max(400, GetViewportWidth()));
             return;
         }
 
-        var pps = Math.Max(2, PixelsPerSecond);
-        var width = Math.Max(400, timeline.Duration.TotalSeconds * pps + 80);
-        RootCanvas.Width = width;
+        var pps = Math.Max(MinPixelsPerSecond, PixelsPerSecond);
+        var viewport = GetViewportWidth();
+        var width = Math.Max(viewport > 1 ? viewport : 400, timeline.Duration.TotalSeconds * pps);
+        SetCanvasWidth(width);
 
         var boundaries = timeline.GetBoundaries();
         const double trackTop = 70;
@@ -198,6 +361,7 @@ public partial class TimelineControl : UserControl
         {
             var marker = timeline.Markers[i];
             var x = marker.Time.TotalSeconds * pps;
+            var isSelected = _selectedMarkerSet.Contains(marker.Id);
 
             var prevX = i == 0 ? 0 : timeline.Markers[i - 1].Time.TotalSeconds * pps;
             var nextX = i == timeline.Markers.Count - 1
@@ -217,51 +381,40 @@ public partial class TimelineControl : UserControl
                     AddThumb(thumb.AfterImage, x + 2, 8, thumbWidth, thumbHeight);
             }
 
+            var brush = MarkerBrush(marker.Source, isSelected);
             var line = new Line
             {
                 X1 = x,
                 X2 = x,
                 Y1 = 4,
                 Y2 = trackTop + trackHeight,
-                Stroke = SelectedMarkerId == marker.Id ? Brushes.Orange : Brushes.DeepSkyBlue,
-                StrokeThickness = SelectedMarkerId == marker.Id ? 3 : 2,
+                Stroke = brush,
+                StrokeThickness = isSelected ? 3 : 2,
                 Tag = marker.Id,
-                Cursor = Cursors.SizeWE
+                Cursor = Cursors.Hand
             };
             line.MouseLeftButtonDown += (_, e) =>
             {
-                SelectedMarkerId = marker.Id;
-                MarkerSelected?.Invoke(this, marker.Id);
-                _dragMarkerId = marker.Id;
-                _dragging = true;
-                line.CaptureMouse();
+                MarkerClicked?.Invoke(this, marker.Id);
                 e.Handled = true;
             };
-            line.MouseMove += OnMarkerMouseMove;
-            line.MouseLeftButtonUp += OnMarkerMouseUp;
             RootCanvas.Children.Add(line);
 
             var handle = new Ellipse
             {
                 Width = 10,
                 Height = 10,
-                Fill = SelectedMarkerId == marker.Id ? Brushes.Orange : Brushes.DeepSkyBlue,
+                Fill = brush,
                 Tag = marker.Id,
-                Cursor = Cursors.SizeWE
+                Cursor = Cursors.Hand
             };
             Canvas.SetLeft(handle, x - 5);
             Canvas.SetTop(handle, trackTop + trackHeight - 5);
             handle.MouseLeftButtonDown += (_, e) =>
             {
-                SelectedMarkerId = marker.Id;
-                MarkerSelected?.Invoke(this, marker.Id);
-                _dragMarkerId = marker.Id;
-                _dragging = true;
-                handle.CaptureMouse();
+                MarkerClicked?.Invoke(this, marker.Id);
                 e.Handled = true;
             };
-            handle.MouseMove += OnMarkerMouseMove;
-            handle.MouseLeftButtonUp += OnMarkerMouseUp;
             RootCanvas.Children.Add(handle);
         }
 
@@ -304,53 +457,53 @@ public partial class TimelineControl : UserControl
         if (_playheadLine is null || Timeline is null)
             return;
 
-        var x = Playhead.TotalSeconds * Math.Max(2, PixelsPerSecond);
+        var x = Playhead.TotalSeconds * Math.Max(MinPixelsPerSecond, PixelsPerSecond);
         _playheadLine.X1 = x;
         _playheadLine.X2 = x;
     }
+
+    private static readonly Brush SceneMarkerBrush = CreateFrozenBrush(0x6C, 0xA0, 0xDC);
+    private static readonly Brush SceneMarkerSelectedBrush = CreateFrozenBrush(0xF0, 0xA0, 0x4B);
+
+    private static SolidColorBrush CreateFrozenBrush(byte r, byte g, byte b)
+    {
+        var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
+        brush.Freeze();
+        return brush;
+    }
+
+    /// <summary>
+    /// Manual markers: bright sky blue / orange when selected.
+    /// Scene-detect markers: softer cornflower blue / amber when selected (similar palette).
+    /// </summary>
+    private static Brush MarkerBrush(MarkerSource source, bool selected) =>
+        (source, selected) switch
+        {
+            (MarkerSource.User, false) => Brushes.DeepSkyBlue,
+            (MarkerSource.User, true) => Brushes.Orange,
+            (MarkerSource.SceneDetect, false) => SceneMarkerBrush,
+            (MarkerSource.SceneDetect, true) => SceneMarkerSelectedBrush,
+            _ => Brushes.DeepSkyBlue
+        };
 
     private void OnCanvasMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (Timeline is null)
             return;
 
+        var pps = Math.Max(MinPixelsPerSecond, PixelsPerSecond);
         var pos = e.GetPosition(RootCanvas);
-        var time = TimeSpan.FromSeconds(Math.Clamp(pos.X / Math.Max(2, PixelsPerSecond), 0, Timeline.Duration.TotalSeconds));
+        var time = TimeSpan.FromSeconds(Math.Clamp(pos.X / pps, 0, Timeline.Duration.TotalSeconds));
         SeekRequested?.Invoke(this, time);
     }
 
     private void OnCanvasMouseMove(object sender, MouseEventArgs e)
     {
-        if (!_dragging || _dragMarkerId is null || Timeline is null)
-            return;
-
-        var pos = e.GetPosition(RootCanvas);
-        var time = TimeSpan.FromSeconds(Math.Clamp(pos.X / Math.Max(2, PixelsPerSecond), 0, Timeline.Duration.TotalSeconds));
-        MarkerMoved?.Invoke(this, (_dragMarkerId.Value, time));
+        // Marker dragging removed.
     }
 
     private void OnCanvasMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        _dragging = false;
-        _dragMarkerId = null;
-    }
-
-    private void OnMarkerMouseMove(object sender, MouseEventArgs e)
-    {
-        if (!_dragging || _dragMarkerId is null || e.LeftButton != MouseButtonState.Pressed || Timeline is null)
-            return;
-
-        var pos = e.GetPosition(RootCanvas);
-        var time = TimeSpan.FromSeconds(Math.Clamp(pos.X / Math.Max(2, PixelsPerSecond), 0, Timeline.Duration.TotalSeconds));
-        MarkerMoved?.Invoke(this, (_dragMarkerId.Value, time));
-    }
-
-    private void OnMarkerMouseUp(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is IInputElement el)
-            el.ReleaseMouseCapture();
-        _dragging = false;
-        _dragMarkerId = null;
     }
 
     private void OnCanvasMouseRightButtonDown(object sender, MouseButtonEventArgs e)
@@ -360,11 +513,29 @@ public partial class TimelineControl : UserControl
 
     private void OnPreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        if (Keyboard.Modifiers != ModifierKeys.Control)
-            return;
-
+        var min = MinPixelsPerSecond;
+        var max = Math.Max(MaxPixelsPerSecond, min);
+        var oldPps = Math.Max(min, PixelsPerSecond);
         var factor = e.Delta > 0 ? 1.1 : 1 / 1.1;
-        PixelsPerSecond = Math.Clamp(PixelsPerSecond * factor, 4, 400);
+        var newPps = Math.Clamp(oldPps * factor, min, max);
+        if (Math.Abs(newPps - oldPps) < 1e-9)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        // Keep the timeline time under the cursor fixed while zooming.
+        var mouseOnCanvas = e.GetPosition(RootCanvas);
+        var mouseInViewport = e.GetPosition(Scroller);
+        var timeAtMouse = mouseOnCanvas.X / oldPps;
+
+        PixelsPerSecond = newPps;
+
+        // Redraw/layout updates canvas width from the new PPS; then re-center scroll on the cursor.
+        UpdateLayout();
+        var newX = timeAtMouse * newPps;
+        var targetOffset = newX - mouseInViewport.X;
+        Scroller.ScrollToHorizontalOffset(Math.Max(0, targetOffset));
         e.Handled = true;
     }
 }

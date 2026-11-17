@@ -246,5 +246,44 @@ public class TimelineTests
         loaded.IsSuccess.Should().BeTrue();
         loaded.Value.Timeline.Joins.Should().ContainSingle(j => j.Mode == TransitionMode.Crossfade);
         loaded.Value.Timeline.Settings.FadeToBlackAtEnd.Should().BeTrue();
+        loaded.Value.Timeline.Settings.FadeFromBlackAtStart.Should().BeFalse();
+    }
+
+    [Fact]
+    public void SetStartFade_FailsWhenTooLong()
+    {
+        var timeline = CreateWithMarkers(90);
+        var result = timeline.SetStartFade(true, 101);
+        result.IsSuccess.Should().BeFalse();
+    }
+
+    [Fact]
+    public void SnapToNearestKept_SnapsDeletedTimesToEdges()
+    {
+        var timeline = CreateWithMarkers(10, 20, 40, 50);
+        timeline = timeline.DeleteBetween(timeline.Markers[0].Id, timeline.Markers[1].Id).Value!;
+        timeline = timeline.DeleteBetween(timeline.Markers[2].Id, timeline.Markers[3].Id).Value!;
+
+        timeline.IsKeptTime(TimeSpan.FromSeconds(5)).Should().BeTrue();
+        timeline.IsKeptTime(TimeSpan.FromSeconds(15)).Should().BeFalse();
+        timeline.SnapToNearestKept(TimeSpan.FromSeconds(15)).Should().Be(TimeSpan.FromSeconds(10));
+        timeline.SnapToNearestKept(TimeSpan.FromSeconds(18)).Should().Be(TimeSpan.FromSeconds(20));
+        timeline.SnapToNearestKept(TimeSpan.FromSeconds(30)).Should().Be(TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
+    public void ProjectDocument_RoundTripsStartFade()
+    {
+        var timeline = CreateWithMarkers(10, 20, 30);
+        timeline = timeline.SetStartFade(true, 1.5).Value!;
+        timeline = timeline.SetEndFade(true, 2.0).Value!;
+
+        var doc = ProjectDocument.FromTimeline(@"C:\video.mp4", timeline);
+        var loaded = ProjectDocument.Deserialize(ProjectDocument.Serialize(doc)).Value!.ToTimeline();
+        loaded.IsSuccess.Should().BeTrue();
+        loaded.Value.Timeline.Settings.FadeFromBlackAtStart.Should().BeTrue();
+        loaded.Value.Timeline.Settings.FadeFromBlackSeconds.Should().Be(1.5);
+        loaded.Value.Timeline.Settings.FadeToBlackAtEnd.Should().BeTrue();
+        loaded.Value.Timeline.Settings.FadeToBlackSeconds.Should().Be(2.0);
     }
 }

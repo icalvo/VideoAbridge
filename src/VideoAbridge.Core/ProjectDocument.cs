@@ -10,6 +10,8 @@ public sealed class ProjectDocument
     public List<MarkerDto> Markers { get; init; } = [];
     public List<bool> SegmentDeleted { get; init; } = [];
     public List<JoinDto> Joins { get; init; } = [];
+    public bool FadeFromBlackAtStart { get; init; }
+    public double FadeFromBlackSeconds { get; init; }
     public bool FadeToBlackAtEnd { get; init; }
     public double FadeToBlackSeconds { get; init; }
 
@@ -30,6 +32,8 @@ public sealed class ProjectDocument
             Mode = j.Mode.ToString(),
             CrossfadeSeconds = j.CrossfadeSeconds
         }).ToList(),
+        FadeFromBlackAtStart = timeline.Settings.FadeFromBlackAtStart,
+        FadeFromBlackSeconds = timeline.Settings.FadeFromBlackSeconds,
         FadeToBlackAtEnd = timeline.Settings.FadeToBlackAtEnd,
         FadeToBlackSeconds = timeline.Settings.FadeToBlackSeconds
     };
@@ -66,7 +70,11 @@ public sealed class ProjectDocument
                 mode == TransitionMode.Crossfade ? dto.CrossfadeSeconds : 0));
         }
 
-        var settings = new ProjectSettings(FadeToBlackAtEnd, FadeToBlackAtEnd ? FadeToBlackSeconds : 0);
+        var settings = new ProjectSettings(
+            FadeFromBlackAtStart,
+            FadeFromBlackAtStart ? FadeFromBlackSeconds : 0,
+            FadeToBlackAtEnd,
+            FadeToBlackAtEnd ? FadeToBlackSeconds : 0);
         var timeline = Timeline.FromPersistedState(
             TimeSpan.FromSeconds(DurationSeconds),
             markers,

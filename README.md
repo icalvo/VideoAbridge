@@ -21,13 +21,12 @@ dotnet test VideoAbridge.slnx
 
 ## Usage
 
-1. **File → Open Video** — probes duration, runs scene detection, loads the viewer.
+1. **File → Open Video** — probes duration, restores cached edit state for that file (markers, cuts, fades, joins), and resumes scene detection.
 2. Timeline markers can be added/removed/dragged. Ctrl+Wheel zooms.
-3. **Set Anchor** on one marker, select another, then **Delete Between** / **Restore Between**.
+3. Select markers, then **Delete Section** / **Undelete Section** (or from beginning / to end).
 4. Click a **Cut** / **XF** label under a deleted section to configure that join (hard cut or crossfade seconds, capped by adjacent kept lengths).
-5. Optional end fade in the side panel.
-6. **File → Save Project** / **Open Project** for `.vabproj` JSON.
-7. **File → Export** writes an abridged MP4 via FFmpeg.
+5. Optional start/end fades in the side panel (duration `0` = off).
+6. **File → Export** writes an abridged MP4 via FFmpeg.
 
 ## Solution layout
 

@@ -8,39 +8,43 @@
         Width="1280"
         MinHeight="600"
         MinWidth="960"
-        Background="#2D2D30">
+        Background="#2D2D30"
+        Icon="pack://application:,,,/Assets/VideoAbridge.ico">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+    </Window.Resources>
     <DockPanel>
-        <Menu DockPanel.Dock="Top" Background="#3C3C3C" Foreground="White">
+        <Menu DockPanel.Dock="Top"
+              Background="{DynamicResource {x:Static SystemColors.MenuBarBrushKey}}"
+              Foreground="{DynamicResource {x:Static SystemColors.MenuTextBrushKey}}">
             <MenuItem Header="_File">
                 <MenuItem Header="Open _Video…" Command="{Binding OpenVideoCommand}"/>
-                <MenuItem Header="Open _Project…" Command="{Binding OpenProjectCommand}"/>
-                <MenuItem Header="_Save Project…" Command="{Binding SaveProjectCommand}"/>
                 <Separator/>
                 <MenuItem Header="E_xport…" Command="{Binding ExportCommand}"/>
                 <MenuItem Header="Cancel Export" Command="{Binding CancelExportCommand}"/>
             </MenuItem>
             <MenuItem Header="_Edit">
-                <MenuItem Header="Add Marker at Playhead" Command="{Binding AddMarkerAtPlayheadCommand}"/>
-                <MenuItem Header="Remove Selected Marker" Command="{Binding RemoveSelectedMarkerCommand}"/>
+                <MenuItem Header="Add Marker" Command="{Binding AddMarkerAtPlayheadCommand}"/>
+                <MenuItem Header="Delete Marker" Command="{Binding DeleteMarkerCommand}"/>
                 <Separator/>
-                <MenuItem Header="Set Range Anchor" Command="{Binding SetRangeAnchorCommand}"/>
-                <MenuItem Header="Delete Between Anchor and Selection" Command="{Binding DeleteBetweenSelectionCommand}"/>
-                <MenuItem Header="Restore Between Anchor and Selection" Command="{Binding RestoreBetweenSelectionCommand}"/>
+                <MenuItem Header="Delete Section" Command="{Binding DeleteSectionCommand}"/>
+                <MenuItem Header="Undelete Section" Command="{Binding UndeleteSectionCommand}"/>
+                <MenuItem Header="Delete Section from Beginning" Command="{Binding DeleteSectionFromBeginningCommand}"/>
+                <MenuItem Header="Delete Section to End" Command="{Binding DeleteSectionToEndCommand}"/>
                 <Separator/>
-                <MenuItem Header="Detect Scenes Again" Command="{Binding DetectScenesCommand}"/>
+                <MenuItem Header="Detect Scenes" Command="{Binding DetectScenesCommand}"/>
+            </MenuItem>
+            <MenuItem Header="_View">
+                <MenuItem Header="_Tasks" Command="{Binding ShowTasksCommand}"/>
             </MenuItem>
         </Menu>
 
         <StatusBar DockPanel.Dock="Bottom" Background="#007ACC">
             <StatusBarItem>
-                <TextBlock Text="{Binding StatusMessage}" Foreground="White"/>
+                <TextBlock Text="{Binding StatusBarText}" Foreground="White" TextTrimming="CharacterEllipsis"/>
             </StatusBarItem>
             <StatusBarItem HorizontalAlignment="Right">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="{Binding Playhead, StringFormat={}{0:hh\\:mm\\:ss\\.ff}}" Foreground="White" Margin="0,0,12,0"/>
-                    <ProgressBar Width="160" Height="12" Minimum="0" Maximum="1"
-                                 Value="{Binding ExportProgress}"/>
-                </StackPanel>
+                <TextBlock Text="{Binding Playhead, StringFormat={}{0:hh\\:mm\\:ss\\.ff}}" Foreground="White"/>
             </StatusBarItem>
         </StatusBar>
 
@@ -55,46 +59,102 @@
                 <ColumnDefinition Width="280"/>
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Row="0" Grid.Column="0" Background="Black" CornerRadius="2">
-                <vlc:VideoView x:Name="VideoView"/>
+            <Border Grid.Row="0" Grid.Column="0" Background="Black" CornerRadius="2" ClipToBounds="True">
+                <!-- Overlay lives inside VideoView Content so it sits above the Win32 video surface. -->
+                <vlc:VideoView x:Name="VideoView">
+                    <Grid x:Name="PreviewHost"
+                          Background="#01000000"
+                          MouseEnter="PreviewHost_MouseEnter"
+                          MouseLeave="PreviewHost_MouseLeave"
+                          MouseMove="PreviewHost_MouseMove">
+                        <!-- Realtime crossfade: secondary frames as WPF Image (opacity works; HWND does not). -->
+                        <Image Source="{Binding PreviewSecondaryFrame}"
+                               Stretch="Uniform"
+                               Opacity="{Binding PreviewSecondaryOpacity}"
+                               IsHitTestVisible="False"/>
+                        <!-- Realtime fade in/out from/to black -->
+                        <Rectangle Fill="Black"
+                                   Opacity="{Binding PreviewBlackoutOpacity}"
+                                   IsHitTestVisible="False"/>
+                        <Button x:Name="PlayPauseOverlayButton"
+                                Width="72" Height="72"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Opacity="0"
+                                IsHitTestVisible="False"
+                                Cursor="Hand"
+                                Command="{Binding PlayPauseCommand}"
+                                ToolTip="Play / Pause"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Focusable="False">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Grid>
+                                        <Ellipse Fill="#99000000" Stroke="#66FFFFFF" StrokeThickness="1"/>
+                                        <Viewbox Width="28" Height="28"
+                                                 HorizontalAlignment="Center"
+                                                 VerticalAlignment="Center">
+                                            <Grid Width="24" Height="24">
+                                                <Path x:Name="PlayIcon"
+                                                      Fill="White"
+                                                      Data="M 6,3 L 6,21 L 20,12 Z"
+                                                      Visibility="Visible"/>
+                                                <Canvas x:Name="PauseIcon" Visibility="Collapsed">
+                                                    <Rectangle Canvas.Left="5" Canvas.Top="3" Width="5" Height="18" Fill="White" RadiusX="1" RadiusY="1"/>
+                                                    <Rectangle Canvas.Left="14" Canvas.Top="3" Width="5" Height="18" Fill="White" RadiusX="1" RadiusY="1"/>
+                                                </Canvas>
+                                            </Grid>
+                                        </Viewbox>
+                                    </Grid>
+                                    <ControlTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding IsPlaying}" Value="True">
+                                            <Setter TargetName="PlayIcon" Property="Visibility" Value="Collapsed"/>
+                                            <Setter TargetName="PauseIcon" Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                    </Grid>
+                </vlc:VideoView>
             </Border>
 
             <Border Grid.Row="0" Grid.Column="1" Background="#333337" Margin="8,0,0,0" Padding="12">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
-                        <TextBlock Text="Playback" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
-                        <Button Content="Play / Pause" Command="{Binding PlayPauseCommand}" Margin="0,0,0,12" Padding="8,4"/>
+                        <StackPanel Margin="0,0,0,16"
+                                    Visibility="{Binding HasSelectedJoin, Converter={StaticResource BoolToVis}}">
+                            <TextBlock Text="Crossfade (s)" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
+                            <TextBlock Foreground="#AAA" TextWrapping="Wrap" Margin="0,0,0,8"
+                                       Text="0 = hard cut. Click a Cut/XF label under a deleted section to select it."/>
+                            <TextBox Text="{Binding SelectedCrossfadeSeconds, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,4"/>
+                            <TextBlock Foreground="#AAA"
+                                       Text="{Binding SelectedCrossfadeCap, StringFormat=Max: {0:0.###}s}"/>
+                        </StackPanel>
 
-                        <TextBlock Text="Zoom (Ctrl+Wheel on timeline)" Foreground="#CCC" Margin="0,0,0,4"/>
-                        <Slider Minimum="4" Maximum="200" Value="{Binding PixelsPerSecond}" Margin="0,0,0,16"/>
-
-                        <TextBlock Text="Selected join" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
-                        <TextBlock Foreground="#AAA" TextWrapping="Wrap" Margin="0,0,0,8"
-                                   Text="Click a Cut/XF label under a deleted section to select it."/>
-                        <Button Content="Hard Cut" Command="{Binding ApplyHardCutCommand}" Margin="0,0,0,6" Padding="8,4"/>
-                        <DockPanel Margin="0,0,0,4">
-                            <Button DockPanel.Dock="Right" Content="Apply XF" Command="{Binding ApplyCrossfadeCommand}" Padding="8,4" Margin="8,0,0,0"/>
-                            <TextBox Text="{Binding SelectedCrossfadeSeconds, UpdateSourceTrigger=PropertyChanged}"/>
-                        </DockPanel>
+                        <TextBlock Text="Start fade from black (s)" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
+                        <TextBox Text="{Binding FadeFromBlackSeconds, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,4"/>
                         <TextBlock Foreground="#AAA" Margin="0,0,0,16"
-                                   Text="{Binding SelectedCrossfadeCap, StringFormat=Max crossfade: {0:0.###}s}"/>
+                                   Text="{Binding StartFadeCap, StringFormat=Max: {0:0.###}s}"/>
 
-                        <TextBlock Text="End fade to black" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
-                        <CheckBox Content="Enabled" IsChecked="{Binding FadeToBlackEnabled}" Foreground="White" Margin="0,0,0,6"/>
-                        <TextBox Text="{Binding FadeToBlackSeconds, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,6"/>
-                        <Button Content="Apply End Fade" Command="{Binding ApplyEndFadeCommand}" Padding="8,4"/>
+                        <TextBlock Text="End fade to black (s)" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
+                        <TextBox Text="{Binding FadeToBlackSeconds, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,4"/>
+                        <TextBlock Foreground="#AAA"
+                                   Text="{Binding EndFadeCap, StringFormat=Max: {0:0.###}s}"/>
                     </StackPanel>
                 </ScrollViewer>
             </Border>
 
             <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,8">
+                <Button Content="{Binding PreviewModeToggleLabel}" Command="{Binding TogglePreviewModeCommand}" Margin="0,0,8,0" Padding="10,4"
+                        FontWeight="SemiBold"/>
                 <Button Content="Add Marker" Command="{Binding AddMarkerAtPlayheadCommand}" Margin="0,0,8,0" Padding="10,4"/>
-                <Button Content="Remove Marker" Command="{Binding RemoveSelectedMarkerCommand}" Margin="0,0,8,0" Padding="10,4"/>
-                <Button Content="Set Anchor" Command="{Binding SetRangeAnchorCommand}" Margin="0,0,8,0" Padding="10,4"/>
-                <Button Content="Delete Between" Command="{Binding DeleteBetweenSelectionCommand}" Margin="0,0,8,0" Padding="10,4"/>
-                <Button Content="Restore Between" Command="{Binding RestoreBetweenSelectionCommand}" Margin="0,0,8,0" Padding="10,4"/>
-                <Button Content="Delete Start→Sel" Command="{Binding DeleteFromStartToSelectionCommand}" Margin="0,0,8,0" Padding="10,4"/>
-                <Button Content="Delete Sel→End" Command="{Binding DeleteFromSelectionToEndCommand}" Margin="0,0,8,0" Padding="10,4"/>
+                <Button Content="Delete Marker" Command="{Binding DeleteMarkerCommand}" Margin="0,0,8,0" Padding="10,4"/>
+                <Button Content="Delete Section" Command="{Binding DeleteSectionCommand}" Margin="0,0,8,0" Padding="10,4"/>
+                <Button Content="Undelete Section" Command="{Binding UndeleteSectionCommand}" Margin="0,0,8,0" Padding="10,4"/>
+                <Button Content="Delete Section from Beginning" Command="{Binding DeleteSectionFromBeginningCommand}" Margin="0,0,8,0" Padding="10,4"/>
+                <Button Content="Delete Section to End" Command="{Binding DeleteSectionToEndCommand}" Margin="0,0,8,0" Padding="10,4"/>
                 <Button Content="Detect Scenes" Command="{Binding DetectScenesCommand}" Padding="10,4"/>
             </StackPanel>
 
@@ -103,8 +163,10 @@
                                       Timeline="{Binding Timeline}"
                                       Playhead="{Binding Playhead}"
                                       PixelsPerSecond="{Binding PixelsPerSecond, Mode=TwoWay}"
+                                      MinPixelsPerSecond="{Binding MinPixelsPerSecond, Mode=TwoWay}"
+                                      MaxPixelsPerSecond="{Binding MaxPixelsPerSecond, Mode=TwoWay}"
                                       MarkerThumbs="{Binding MarkerThumbs}"
-                                      SelectedMarkerId="{Binding SelectedMarkerId, Mode=TwoWay}"
+                                      SelectedMarkerIds="{Binding SelectedMarkerIds}"
                                       SelectedDeletedRunId="{Binding SelectedDeletedRunId, Mode=TwoWay}"/>
         </Grid>
     </DockPanel>

@@ -56,7 +56,18 @@ public static class ProcessRunner
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        // Kill immediately on cancel (don't wait for WaitForExitAsync to observe the token).
+        using var killOnCancel = cancellationToken.Register(() => TryKill(process));
+
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            TryKill(process);
+            throw;
+        }
 
         return new ProcessResult
         {
@@ -64,5 +75,18 @@ public static class ProcessRunner
             StandardOutput = stdout.ToString(),
             StandardError = stderr.ToString()
         };
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+        }
+        catch
+        {
+            // Best-effort cleanup when cancelling.
+        }
     }
 }

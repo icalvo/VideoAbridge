@@ -3,12 +3,14 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              MinHeight="160"
              Background="#1E1E1E">
+    <!-- Vertical=Hidden (not Disabled): Disabled can prevent the horizontal bar from appearing. -->
     <ScrollViewer x:Name="Scroller"
                   HorizontalScrollBarVisibility="Auto"
-                  VerticalScrollBarVisibility="Disabled"
+                  VerticalScrollBarVisibility="Hidden"
                   PreviewMouseWheel="OnPreviewMouseWheel">
         <Canvas x:Name="RootCanvas"
                 Height="160"
+                HorizontalAlignment="Left"
                 Background="#252526"
                 MouseLeftButtonDown="OnCanvasMouseLeftButtonDown"
                 MouseMove="OnCanvasMouseMove"

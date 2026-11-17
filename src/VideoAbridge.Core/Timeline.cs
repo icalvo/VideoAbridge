@@ -125,6 +125,71 @@ public sealed class Timeline
         return runs;
     }
 
+    /// <summary>Total duration of all non-deleted sections (the abridged output length).</summary>
+    public TimeSpan GetAbridgedDuration()
+    {
+        var total = TimeSpan.Zero;
+        foreach (var run in GetKeptRuns())
+            total += run.Duration;
+        return total;
+    }
+
+    /// <summary>
+    /// True when <paramref name="time"/> falls inside a kept section (inclusive of both ends).
+    /// </summary>
+    public bool IsKeptTime(TimeSpan time)
+    {
+        if (time < TimeSpan.Zero || time > Duration)
+            return false;
+
+        foreach (var run in GetKeptRuns())
+        {
+            if (time >= run.Start && time <= run.End)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Snaps <paramref name="time"/> to itself when kept, otherwise to the nearest kept edge.
+    /// Returns <see cref="TimeSpan.Zero"/> when nothing is kept.
+    /// </summary>
+    public TimeSpan SnapToNearestKept(TimeSpan time)
+    {
+        var kept = GetKeptRuns();
+        if (kept.Count == 0)
+            return TimeSpan.Zero;
+
+        if (time < TimeSpan.Zero)
+            time = TimeSpan.Zero;
+        else if (time > Duration)
+            time = Duration;
+
+        foreach (var run in kept)
+        {
+            if (time >= run.Start && time <= run.End)
+                return time;
+        }
+
+        var best = kept[0].Start;
+        var bestDist = AbsDiff(time, best);
+        foreach (var run in kept)
+        {
+            foreach (var edge in (TimeSpan[])[run.Start, run.End])
+            {
+                var dist = AbsDiff(time, edge);
+                if (dist < bestDist)
+                {
+                    bestDist = dist;
+                    best = edge;
+                }
+            }
+        }
+
+        return best;
+    }
+
     public Result<Timeline> AddMarker(TimeSpan time, MarkerSource source) =>
         AddMarker(time, source, Guid.NewGuid());
 
@@ -255,12 +320,36 @@ public sealed class Timeline
             Duration, Markers, Segments, Joins.SetItem(index, updated), Settings));
     }
 
+    public Result<Timeline> SetStartFade(bool enabled, double seconds)
+    {
+        if (enabled)
+        {
+            var max = GetStartFadeCap();
+            if (seconds < 0 || seconds > max + 1e-9)
+            {
+                return Result<Timeline>.Fail(
+                    "StartFadeOutOfRange",
+                    $"Start fade must be between 0 and {max:0.###} seconds.");
+            }
+        }
+        else if (seconds < 0)
+        {
+            return Result<Timeline>.Fail("StartFadeOutOfRange", "Start fade seconds cannot be negative.");
+        }
+
+        var settings = Settings with
+        {
+            FadeFromBlackAtStart = enabled,
+            FadeFromBlackSeconds = enabled ? seconds : 0
+        };
+        return Result<Timeline>.Ok(new Timeline(Duration, Markers, Segments, Joins, settings));
+    }
+
     public Result<Timeline> SetEndFade(bool enabled, double seconds)
     {
         if (enabled)
         {
-            var finalKeep = GetKeptRuns().LastOrDefault();
-            var max = finalKeep?.Duration.TotalSeconds ?? 0;
+            var max = GetEndFadeCap();
             if (seconds < 0 || seconds > max + 1e-9)
             {
                 return Result<Timeline>.Fail(
@@ -273,7 +362,11 @@ public sealed class Timeline
             return Result<Timeline>.Fail("EndFadeOutOfRange", "End fade seconds cannot be negative.");
         }
 
-        var settings = new ProjectSettings(enabled, enabled ? seconds : 0);
+        var settings = Settings with
+        {
+            FadeToBlackAtEnd = enabled,
+            FadeToBlackSeconds = enabled ? seconds : 0
+        };
         return Result<Timeline>.Ok(new Timeline(Duration, Markers, Segments, Joins, settings));
     }
 
@@ -306,15 +399,29 @@ public sealed class Timeline
                 join.Mode == TransitionMode.Crossfade ? join.CrossfadeSeconds : 0));
         }
 
-        var fadeSeconds = Settings.FadeToBlackAtEnd ? Settings.FadeToBlackSeconds : 0;
+        var startFadeSeconds = Settings.FadeFromBlackAtStart ? Settings.FadeFromBlackSeconds : 0;
+        if (Settings.FadeFromBlackAtStart)
+        {
+            var max = GetStartFadeCap();
+            if (startFadeSeconds < 0 || startFadeSeconds > max + 1e-9)
+                return Result<ExportPlan>.Fail("InvalidStartFade", "Start fade exceeds the first kept section.");
+        }
+
+        var endFadeSeconds = Settings.FadeToBlackAtEnd ? Settings.FadeToBlackSeconds : 0;
         if (Settings.FadeToBlackAtEnd)
         {
-            var finalDuration = clips[^1].Duration.TotalSeconds;
-            if (fadeSeconds < 0 || fadeSeconds > finalDuration + 1e-9)
+            var max = GetEndFadeCap();
+            if (endFadeSeconds < 0 || endFadeSeconds > max + 1e-9)
                 return Result<ExportPlan>.Fail("InvalidEndFade", "End fade exceeds the final kept section.");
         }
 
-        return Result<ExportPlan>.Ok(new ExportPlan(clips, joins, Settings.FadeToBlackAtEnd, fadeSeconds));
+        return Result<ExportPlan>.Ok(new ExportPlan(
+            clips,
+            joins,
+            Settings.FadeFromBlackAtStart,
+            startFadeSeconds,
+            Settings.FadeToBlackAtEnd,
+            endFadeSeconds));
     }
 
     public double GetCrossfadeCap(TimeSpan deletedStart, TimeSpan deletedEnd)
@@ -325,6 +432,54 @@ public sealed class Timeline
         if (before is null || after is null)
             return 0;
         return Math.Min(before.Duration.TotalSeconds, after.Duration.TotalSeconds);
+    }
+
+    /// <summary>
+    /// Max start-fade duration: length of the first kept section, minus any crossfade
+    /// taken from the end of that section by the following join.
+    /// </summary>
+    public double GetStartFadeCap()
+    {
+        var kept = GetKeptRuns();
+        if (kept.Count == 0)
+            return 0;
+
+        var first = kept[0];
+        var available = first.Duration.TotalSeconds;
+
+        var interiorDeleted = GetDeletedRuns().Where(r => r.IsInterior).ToList();
+        if (kept.Count >= 2 && interiorDeleted.Count >= 1)
+        {
+            var outgoing = interiorDeleted[0].Join;
+            if (outgoing is { Mode: TransitionMode.Crossfade, CrossfadeSeconds: > 0 })
+                available -= outgoing.CrossfadeSeconds;
+        }
+
+        return Math.Max(0, available);
+    }
+
+    /// <summary>
+    /// Max end-fade duration: length of the last kept section, minus any crossfade
+    /// taken from the start of that section by the preceding join.
+    /// </summary>
+    public double GetEndFadeCap()
+    {
+        var kept = GetKeptRuns();
+        if (kept.Count == 0)
+            return 0;
+
+        var last = kept[^1];
+        var available = last.Duration.TotalSeconds;
+
+        var interiorDeleted = GetDeletedRuns().Where(r => r.IsInterior).ToList();
+        if (kept.Count >= 2 && interiorDeleted.Count >= kept.Count - 1)
+        {
+            var incoming = interiorDeleted[kept.Count - 2].Join;
+            if (incoming is { Mode: TransitionMode.Crossfade, CrossfadeSeconds: > 0 })
+                available -= incoming.CrossfadeSeconds;
+        }
+
+        return Math.Max(0, available);
     }
 
     private Result<Timeline> ApplyDeletionFlags(Guid boundaryIdA, Guid boundaryIdB, bool deleted)
@@ -463,16 +618,48 @@ public sealed class Timeline
 
     private static ProjectSettings ClampSettings(Timeline probe, ProjectSettings settings)
     {
-        if (!settings.FadeToBlackAtEnd)
-            return settings;
+        var startEnabled = settings.FadeFromBlackAtStart;
+        var startSeconds = settings.FadeFromBlackSeconds;
+        var endEnabled = settings.FadeToBlackAtEnd;
+        var endSeconds = settings.FadeToBlackSeconds;
 
-        var finalKeep = probe.GetKeptRuns().LastOrDefault();
-        var max = finalKeep?.Duration.TotalSeconds ?? 0;
-        if (max <= 0)
-            return new ProjectSettings(false, 0);
-        if (settings.FadeToBlackSeconds > max)
-            return settings with { FadeToBlackSeconds = max };
-        return settings;
+        if (startEnabled)
+        {
+            var max = probe.GetStartFadeCap();
+            if (max <= 0)
+            {
+                startEnabled = false;
+                startSeconds = 0;
+            }
+            else if (startSeconds > max)
+            {
+                startSeconds = max;
+            }
+        }
+        else
+        {
+            startSeconds = 0;
+        }
+
+        if (endEnabled)
+        {
+            var max = probe.GetEndFadeCap();
+            if (max <= 0)
+            {
+                endEnabled = false;
+                endSeconds = 0;
+            }
+            else if (endSeconds > max)
+            {
+                endSeconds = max;
+            }
+        }
+        else
+        {
+            endSeconds = 0;
+        }
+
+        return new ProjectSettings(startEnabled, startSeconds, endEnabled, endSeconds);
     }
 
     private static bool RangesOverlap(TimeSpan aStart, TimeSpan aEnd, TimeSpan bStart, TimeSpan bEnd) =>

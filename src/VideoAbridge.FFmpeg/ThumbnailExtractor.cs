@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace VideoAbridge.FFmpeg;
 
@@ -17,7 +19,11 @@ public sealed class ThumbnailExtractor
     {
         _ffmpegPath = ffmpegPath ?? FFmpegLocator.FindFFmpeg()
             ?? throw new InvalidOperationException("ffmpeg was not found.");
-        _cacheDirectory = cacheDirectory ?? Path.Combine(Path.GetTempPath(), "VideoAbridge", "thumbs");
+        _cacheDirectory = cacheDirectory
+            ?? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "VideoAbridge",
+                "ThumbCache");
         Directory.CreateDirectory(_cacheDirectory);
     }
 
@@ -43,10 +49,11 @@ public sealed class ThumbnailExtractor
                 seek = TimeSpan.Zero;
         }
 
-        var key = $"{Path.GetFileName(videoPath)}_{seek.TotalMilliseconds:0}_{side}".GetHashCode(StringComparison.Ordinal);
-        var output = Path.Combine(_cacheDirectory, $"{key:X8}.jpg");
+        var output = GetCachePath(videoPath, seek, side);
         if (File.Exists(output))
             return output;
+
+        Directory.CreateDirectory(Path.GetDirectoryName(output)!);
 
         var ss = seek.TotalSeconds.ToString("0.000", CultureInfo.InvariantCulture);
         var result = await ProcessRunner.RunAsync(
@@ -63,5 +70,17 @@ public sealed class ThumbnailExtractor
             cancellationToken).ConfigureAwait(false);
 
         return result.Success && File.Exists(output) ? output : null;
+    }
+
+    /// <summary>
+    /// Stable on-disk path keyed by full video path + seek time + side
+    /// (under %LocalAppData%\VideoAbridge\ThumbCache).
+    /// </summary>
+    public string GetCachePath(string videoPath, TimeSpan seek, ThumbnailSide side)
+    {
+        var fullPath = Path.GetFullPath(videoPath);
+        var videoKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullPath))).ToLowerInvariant();
+        var fileName = $"{(long)Math.Round(seek.TotalMilliseconds)}_{side}.jpg";
+        return Path.Combine(_cacheDirectory, videoKey, fileName);
     }
 }

@@ -16,12 +16,16 @@ public class VideoExporterTests
                 new KeptClip(TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(30))
             ],
             [new ExportJoin(TransitionMode.Crossfade, 1.5)],
+            FadeFromBlackAtStart: true,
+            FadeFromBlackSeconds: 1,
             FadeToBlackAtEnd: true,
             FadeToBlackSeconds: 2);
 
         var filter = VideoExporter.BuildFilterComplex(plan);
         filter.Should().Contain("xfade=");
         filter.Should().Contain("acrossfade=");
+        filter.Should().Contain("fade=t=in");
+        filter.Should().Contain("afade=t=in");
         filter.Should().Contain("fade=t=out");
         filter.Should().Contain("afade=t=out");
         filter.Should().Contain("[vout]");
@@ -37,6 +41,8 @@ public class VideoExporterTests
                 new KeptClip(TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(12))
             ],
             [new ExportJoin(TransitionMode.HardCut, 0)],
+            FadeFromBlackAtStart: false,
+            FadeFromBlackSeconds: 0,
             FadeToBlackAtEnd: false,
             FadeToBlackSeconds: 0);
 

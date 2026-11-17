@@ -15,5 +15,7 @@ public sealed record ExportJoin(
 public sealed record ExportPlan(
     IReadOnlyList<KeptClip> Clips,
     IReadOnlyList<ExportJoin> JoinsBetweenClips,
+    bool FadeFromBlackAtStart,
+    double FadeFromBlackSeconds,
     bool FadeToBlackAtEnd,
     double FadeToBlackSeconds);

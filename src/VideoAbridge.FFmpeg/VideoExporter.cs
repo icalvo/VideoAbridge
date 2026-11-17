@@ -19,12 +19,14 @@ public sealed class VideoExporter
         string outputPath,
         ExportPlan plan,
         IProgress<double>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        ExportEncodeOptions? encodeOptions = null)
     {
         if (plan.Clips.Count == 0)
             throw new ArgumentException("Export plan has no clips.", nameof(plan));
 
-        var args = BuildArguments(inputPath, outputPath, plan);
+        var options = encodeOptions ?? ExportEncodeOptions.Default;
+        var args = BuildArguments(inputPath, outputPath, plan, options);
         var result = await ProcessRunner.RunAsync(
             _ffmpegPath,
             args,
@@ -52,8 +54,13 @@ public sealed class VideoExporter
         progress?.Report(1);
     }
 
-    public static List<string> BuildArguments(string inputPath, string outputPath, ExportPlan plan)
+    public static List<string> BuildArguments(
+        string inputPath,
+        string outputPath,
+        ExportPlan plan,
+        ExportEncodeOptions? encodeOptions = null)
     {
+        var options = encodeOptions ?? ExportEncodeOptions.Default;
         var args = new List<string>
         {
             "-hide_banner",
@@ -61,7 +68,12 @@ public sealed class VideoExporter
             "-i", inputPath
         };
 
-        if (plan.Clips.Count == 1 && plan.JoinsBetweenClips.Count == 0 && !plan.FadeToBlackAtEnd)
+        // Stream-copy shortcut only for high-quality exports of a single trimmed clip.
+        if (!options.ForceTranscode
+            && plan.Clips.Count == 1
+            && plan.JoinsBetweenClips.Count == 0
+            && !plan.FadeFromBlackAtStart
+            && !plan.FadeToBlackAtEnd)
         {
             var clip = plan.Clips[0];
             args.AddRange(
@@ -81,10 +93,10 @@ public sealed class VideoExporter
             "-map", "[vout]",
             "-map", "[aout]",
             "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "18",
+            "-preset", options.Preset,
+            "-crf", options.Crf.ToString(CultureInfo.InvariantCulture),
             "-c:a", "aac",
-            "-b:a", "192k",
+            "-b:a", options.AudioBitrate,
             "-movflags", "+faststart",
             outputPath
         ]);
@@ -140,14 +152,29 @@ public sealed class VideoExporter
             aCurrent = outA;
         }
 
-        if (plan.FadeToBlackAtEnd && plan.FadeToBlackSeconds > 0)
+        var fadeIn = plan.FadeFromBlackAtStart && plan.FadeFromBlackSeconds > 0;
+        var fadeOut = plan.FadeToBlackAtEnd && plan.FadeToBlackSeconds > 0;
+        if (fadeIn || fadeOut)
         {
-            var fade = plan.FadeToBlackSeconds;
-            var fadeStart = Math.Max(0, accumulated - fade);
-            sb.Append(CultureInfo.InvariantCulture,
-                $"[{vCurrent}]fade=t=out:st={FormatDouble(fadeStart)}:d={FormatDouble(fade)}[vout];");
-            sb.Append(CultureInfo.InvariantCulture,
-                $"[{aCurrent}]afade=t=out:st={FormatDouble(fadeStart)}:d={FormatDouble(fade)}[aout]");
+            var vFilters = new List<string>();
+            var aFilters = new List<string>();
+            if (fadeIn)
+            {
+                var fade = plan.FadeFromBlackSeconds;
+                vFilters.Add($"fade=t=in:st=0:d={FormatDouble(fade)}");
+                aFilters.Add($"afade=t=in:st=0:d={FormatDouble(fade)}");
+            }
+
+            if (fadeOut)
+            {
+                var fade = plan.FadeToBlackSeconds;
+                var fadeStart = Math.Max(0, accumulated - fade);
+                vFilters.Add($"fade=t=out:st={FormatDouble(fadeStart)}:d={FormatDouble(fade)}");
+                aFilters.Add($"afade=t=out:st={FormatDouble(fadeStart)}:d={FormatDouble(fade)}");
+            }
+
+            sb.Append(CultureInfo.InvariantCulture, $"[{vCurrent}]{string.Join(",", vFilters)}[vout];");
+            sb.Append(CultureInfo.InvariantCulture, $"[{aCurrent}]{string.Join(",", aFilters)}[aout]");
         }
         else
         {
