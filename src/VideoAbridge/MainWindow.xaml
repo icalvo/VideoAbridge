@@ -23,7 +23,7 @@
                 <MenuItem Header="E_xport…" Command="{Binding ExportCommand}"/>
                 <MenuItem Header="Cancel Export" Command="{Binding CancelExportCommand}"/>
             </MenuItem>
-            <MenuItem Header="_Edit">
+            <MenuItem Header="_Edit" IsEnabled="{Binding ShowEditChrome}">
                 <MenuItem Header="Add Marker" Command="{Binding AddMarkerAtPlayheadCommand}"/>
                 <MenuItem Header="Delete Marker" Command="{Binding DeleteMarkerCommand}"/>
                 <Separator/>
@@ -44,7 +44,7 @@
                 <TextBlock Text="{Binding StatusBarText}" Foreground="White" TextTrimming="CharacterEllipsis"/>
             </StatusBarItem>
             <StatusBarItem HorizontalAlignment="Right">
-                <TextBlock Text="{Binding Playhead, StringFormat={}{0:hh\\:mm\\:ss\\.ff}}" Foreground="White"/>
+                <TextBlock Text="{Binding DisplayPlayhead, StringFormat={}{0:hh\\:mm\\:ss\\.ff}}" Foreground="White"/>
             </StatusBarItem>
         </StatusBar>
 
@@ -127,19 +127,21 @@
                                     Visibility="{Binding HasSelectedJoin, Converter={StaticResource BoolToVis}}">
                             <TextBlock Text="Crossfade (s)" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
                             <TextBlock Foreground="#AAA" TextWrapping="Wrap" Margin="0,0,0,8"
-                                       Text="0 = hard cut. Click a Cut/XF label under a deleted section to select it."/>
+                                       Text="0 = hard cut. Click a Cut/XF on the timeline to select it."/>
                             <TextBox Text="{Binding SelectedCrossfadeSeconds, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,4"/>
                             <TextBlock Foreground="#AAA"
                                        Text="{Binding SelectedCrossfadeCap, StringFormat=Max: {0:0.###}s}"/>
                         </StackPanel>
 
                         <TextBlock Text="Start fade from black (s)" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
-                        <TextBox Text="{Binding FadeFromBlackSeconds, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,4"/>
+                        <TextBox x:Name="StartFadeTextBox"
+                                 Text="{Binding FadeFromBlackSeconds, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,4"/>
                         <TextBlock Foreground="#AAA" Margin="0,0,0,16"
                                    Text="{Binding StartFadeCap, StringFormat=Max: {0:0.###}s}"/>
 
                         <TextBlock Text="End fade to black (s)" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
-                        <TextBox Text="{Binding FadeToBlackSeconds, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,4"/>
+                        <TextBox x:Name="EndFadeTextBox"
+                                 Text="{Binding FadeToBlackSeconds, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,4"/>
                         <TextBlock Foreground="#AAA"
                                    Text="{Binding EndFadeCap, StringFormat=Max: {0:0.###}s}"/>
                     </StackPanel>
@@ -149,19 +151,24 @@
             <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,8">
                 <Button Content="{Binding PreviewModeToggleLabel}" Command="{Binding TogglePreviewModeCommand}" Margin="0,0,8,0" Padding="10,4"
                         FontWeight="SemiBold"/>
-                <Button Content="Add Marker" Command="{Binding AddMarkerAtPlayheadCommand}" Margin="0,0,8,0" Padding="10,4"/>
-                <Button Content="Delete Marker" Command="{Binding DeleteMarkerCommand}" Margin="0,0,8,0" Padding="10,4"/>
-                <Button Content="Delete Section" Command="{Binding DeleteSectionCommand}" Margin="0,0,8,0" Padding="10,4"/>
-                <Button Content="Undelete Section" Command="{Binding UndeleteSectionCommand}" Margin="0,0,8,0" Padding="10,4"/>
-                <Button Content="Delete Section from Beginning" Command="{Binding DeleteSectionFromBeginningCommand}" Margin="0,0,8,0" Padding="10,4"/>
-                <Button Content="Delete Section to End" Command="{Binding DeleteSectionToEndCommand}" Margin="0,0,8,0" Padding="10,4"/>
-                <Button Content="Detect Scenes" Command="{Binding DetectScenesCommand}" Padding="10,4"/>
+                <StackPanel Orientation="Horizontal"
+                            Visibility="{Binding ShowEditChrome, Converter={StaticResource BoolToVis}}">
+                    <Button Content="Add Marker" Command="{Binding AddMarkerAtPlayheadCommand}" Margin="0,0,8,0" Padding="10,4"/>
+                    <Button Content="Delete Marker" Command="{Binding DeleteMarkerCommand}" Margin="0,0,8,0" Padding="10,4"/>
+                    <Button Content="Delete Section" Command="{Binding DeleteSectionCommand}" Margin="0,0,8,0" Padding="10,4"/>
+                    <Button Content="Undelete Section" Command="{Binding UndeleteSectionCommand}" Margin="0,0,8,0" Padding="10,4"/>
+                    <Button Content="Delete Section from Beginning" Command="{Binding DeleteSectionFromBeginningCommand}" Margin="0,0,8,0" Padding="10,4"/>
+                    <Button Content="Delete Section to End" Command="{Binding DeleteSectionToEndCommand}" Margin="0,0,8,0" Padding="10,4"/>
+                    <Button Content="Detect Scenes" Command="{Binding DetectScenesCommand}" Padding="10,4"/>
+                </StackPanel>
             </StackPanel>
 
             <controls:TimelineControl x:Name="Timeline"
                                       Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2"
                                       Timeline="{Binding Timeline}"
-                                      Playhead="{Binding Playhead}"
+                                      Playhead="{Binding DisplayPlayhead}"
+                                      IsPreviewMode="{Binding IsPreviewMode}"
+                                      AbridgedLayout="{Binding AbridgedLayout}"
                                       PixelsPerSecond="{Binding PixelsPerSecond, Mode=TwoWay}"
                                       MinPixelsPerSecond="{Binding MinPixelsPerSecond, Mode=TwoWay}"
                                       MaxPixelsPerSecond="{Binding MaxPixelsPerSecond, Mode=TwoWay}"

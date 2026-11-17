@@ -33,6 +33,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private FrameVideoPlayer? _secondaryPlayer;
     private ExportPlan? _previewPlan;
     private PreviewTimeMap? _previewMap;
+    private AbridgedTimelineLayout? _abridgedLayout;
     private TimeSpan? _seekGateTarget;
     private DateTime _seekGateUntilUtc;
     private bool _inCrossfade;
@@ -40,6 +41,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string? _videoPath;
     [ObservableProperty] private Timeline? _timeline;
     [ObservableProperty] private TimeSpan _playhead;
+    [ObservableProperty] private TimeSpan _abridgedPlayhead;
     [ObservableProperty] private string _statusBarText = "Open a video to begin.";
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private bool _isExporting;
@@ -58,7 +60,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public string PreviewModeToggleLabel => IsPreviewMode ? "Edit" : "Preview";
 
+    public bool ShowEditChrome => !IsPreviewMode;
+
     public bool HasSelectedJoin => SelectedDeletedRunId is not null;
+
+    public AbridgedTimelineLayout? AbridgedLayout => _abridgedLayout;
+
+    /// <summary>Timeline needle: abridged clock in Preview, source clock in Edit.</summary>
+    public TimeSpan DisplayPlayhead => IsPreviewMode ? AbridgedPlayhead : Playhead;
 
     [ObservableProperty] private double _minPixelsPerSecond = 4;
     [ObservableProperty] private double _maxPixelsPerSecond = 400;
@@ -77,6 +86,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     /// <summary>Invoked when there are no running tasks and no completed tasks with results.</summary>
     public Action? RequestCloseTasksWindow { get; set; }
+
+    /// <summary>Invoked to focus the start-fade duration TextBox.</summary>
+    public Action? RequestFocusStartFade { get; set; }
+
+    /// <summary>Invoked to focus the end-fade duration TextBox.</summary>
+    public Action? RequestFocusEndFade { get; set; }
 
     public MainViewModel()
     {
@@ -105,7 +120,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         RefreshStatusBar();
     }
 
-    partial void OnPlayheadChanged(TimeSpan value) => NotifyTimelineActionCommands();
+    partial void OnPlayheadChanged(TimeSpan value)
+    {
+        OnPropertyChanged(nameof(DisplayPlayhead));
+        NotifyTimelineActionCommands();
+    }
+
+    partial void OnAbridgedPlayheadChanged(TimeSpan value) => OnPropertyChanged(nameof(DisplayPlayhead));
 
     partial void OnIsDetectingScenesChanged(bool value) => NotifyTimelineActionCommands();
 
@@ -155,12 +176,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnIsPreviewModeChanged(bool value)
     {
         OnPropertyChanged(nameof(PreviewModeToggleLabel));
+        OnPropertyChanged(nameof(ShowEditChrome));
+        OnPropertyChanged(nameof(DisplayPlayhead));
         if (value)
             EnterRealtimePreview();
         else
             ExitRealtimePreview();
         RefreshStatusBar();
     }
+
+    public void FocusStartFade() => RequestFocusStartFade?.Invoke();
+
+    public void FocusEndFade() => RequestFocusEndFade?.Invoke();
 
     partial void OnSelectedDeletedRunIdChanged(Guid? value)
     {
@@ -603,11 +630,35 @@ public partial class MainViewModel : ObservableObject, IDisposable
             time = Timeline.SnapToNearestKept(time);
 
         Playhead = time;
+        SyncAbridgedPlayheadFromSource(time);
         EndCrossfadeVisuals();
         GateSeek(time);
         _player.Seek(time);
         if (IsPreviewMode)
             ApplyPreviewVisuals(time);
+    }
+
+    /// <summary>Preview timeline seek: <paramref name="abridged"/> is export-clock time.</summary>
+    public void SeekAbridgedPlayhead(TimeSpan abridged)
+    {
+        if (_previewMap is null || Timeline is null)
+            return;
+
+        if (abridged < TimeSpan.Zero)
+            abridged = TimeSpan.Zero;
+        else if (abridged > _previewMap.AbridgedDuration)
+            abridged = _previewMap.AbridgedDuration;
+
+        AbridgedPlayhead = abridged;
+        var source = _previewMap.ToSource(abridged);
+        SeekPlayhead(source);
+    }
+
+    private void SyncAbridgedPlayheadFromSource(TimeSpan sourceTime)
+    {
+        if (_previewMap is null)
+            return;
+        AbridgedPlayhead = _previewMap.ToAbridged(sourceTime);
     }
 
     private void HandlePlayerTime(TimeSpan time)
@@ -631,6 +682,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 // Keep the needle stable while LibVLC finishes the jump; do not re-seek.
                 Playhead = gate;
+                SyncAbridgedPlayheadFromSource(gate);
                 return;
             }
             else
@@ -639,6 +691,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 // falling through into another Evaluate→Jump loop on stale gap times.
                 GateSeek(gate);
                 Playhead = gate;
+                SyncAbridgedPlayheadFromSource(gate);
                 _player.Seek(gate);
                 return;
             }
@@ -646,6 +699,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var state = PreviewComposer.Evaluate(_previewPlan, _previewMap, time);
         Playhead = state.PlayheadSourceTime;
+        SyncAbridgedPlayheadFromSource(state.PlayheadSourceTime);
         PreviewBlackoutOpacity = state.BlackoutOpacity;
 
         if (state.JumpPrimaryTo is { } jump)
@@ -655,12 +709,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 && AbsDiff(active, jump) <= frameEps)
             {
                 Playhead = active;
+                SyncAbridgedPlayheadFromSource(active);
                 return;
             }
 
             EndCrossfadeVisuals();
             GateSeek(jump);
             Playhead = jump;
+            SyncAbridgedPlayheadFromSource(jump);
             _player.Seek(jump);
             ApplyVolumes(state.BlackoutOpacity, incomingOpacity: 0);
             if (state.PreviewComplete && IsPlaying)
@@ -744,6 +800,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         EndCrossfadeVisuals();
         _previewPlan = null;
         _previewMap = null;
+        _abridgedLayout = null;
+        OnPropertyChanged(nameof(AbridgedLayout));
         _seekGateTarget = null;
         PreviewBlackoutOpacity = 0;
         PreviewSecondaryOpacity = 0;
@@ -766,10 +824,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         _previewPlan = planResult.Value!;
         _previewMap = PreviewTimeMap.FromPlan(_previewPlan);
+        _abridgedLayout = AbridgedTimelineLayout.FromTimeline(Timeline);
+        OnPropertyChanged(nameof(AbridgedLayout));
         EndCrossfadeVisuals();
 
         var snapped = Timeline.SnapToNearestKept(Playhead);
         Playhead = snapped;
+        SyncAbridgedPlayheadFromSource(snapped);
         if (seekToPlayhead)
         {
             GateSeek(snapped);
@@ -1332,7 +1393,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var parts = new List<string>
         {
             IsPreviewMode ? "Preview" : "Edit",
-            $"Abridged: {FormatTime(Timeline.GetAbridgedDuration())}"
+            IsPreviewMode
+                ? $"Abridged: {FormatTime(_previewMap?.AbridgedDuration ?? Timeline.GetAbridgedDuration())}"
+                : $"Abridged: {FormatTime(Timeline.GetAbridgedDuration())}"
         };
 
         if (SelectedMarkerIds.Count >= 1)

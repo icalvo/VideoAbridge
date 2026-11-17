@@ -24,12 +24,22 @@ public partial class MainWindow : Window
         _previewChromeHideTimer = new DispatcherTimer { Interval = PreviewChromeHideDelay };
         _previewChromeHideTimer.Tick += (_, _) => HidePreviewChrome();
 
-        Timeline.SeekRequested += (_, time) => _viewModel.SeekPlayhead(time);
+        Timeline.SeekRequested += (_, time) =>
+        {
+            if (_viewModel.IsPreviewMode)
+                _viewModel.SeekAbridgedPlayhead(time);
+            else
+                _viewModel.SeekPlayhead(time);
+        };
         Timeline.MarkerClicked += (_, id) => _viewModel.ToggleMarkerSelection(id);
         Timeline.DeletedRunSelected += (_, id) => _viewModel.SelectDeletedRunCommand.Execute(id);
+        Timeline.FadeInClicked += (_, _) => FocusFadeTextBox(StartFadeTextBox);
+        Timeline.FadeOutClicked += (_, _) => FocusFadeTextBox(EndFadeTextBox);
 
         _viewModel.RequestShowTasksWindow = ShowOrActivateTasksWindow;
         _viewModel.RequestCloseTasksWindow = CloseTasksWindow;
+        _viewModel.RequestFocusStartFade = () => FocusFadeTextBox(StartFadeTextBox);
+        _viewModel.RequestFocusEndFade = () => FocusFadeTextBox(EndFadeTextBox);
 
         Closing += (_, _) =>
         {
@@ -75,6 +85,12 @@ public partial class MainWindow : Window
             if (path is not null)
                 await _viewModel.OpenVideoPathAsync(path);
         };
+    }
+
+    private static void FocusFadeTextBox(System.Windows.Controls.TextBox box)
+    {
+        box.Focus();
+        box.SelectAll();
     }
 
     private void PreviewHost_MouseEnter(object sender, MouseEventArgs e) => ShowPreviewChrome();

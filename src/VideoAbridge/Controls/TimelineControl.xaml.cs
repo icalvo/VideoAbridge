@@ -48,11 +48,22 @@ public partial class TimelineControl : UserControl
         DependencyProperty.Register(nameof(SelectedDeletedRunId), typeof(Guid?), typeof(TimelineControl),
             new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, OnVisualPropertyChanged));
 
+    public static readonly DependencyProperty IsPreviewModeProperty =
+        DependencyProperty.Register(nameof(IsPreviewMode), typeof(bool), typeof(TimelineControl),
+            new PropertyMetadata(false, OnPreviewModeChanged));
+
+    public static readonly DependencyProperty AbridgedLayoutProperty =
+        DependencyProperty.Register(nameof(AbridgedLayout), typeof(AbridgedTimelineLayout), typeof(TimelineControl),
+            new PropertyMetadata(null, OnAbridgedLayoutChanged));
+
+    public const double MinOverlayPixels = 6;
+
     private Line? _playheadLine;
     private TimeSpan _fittedDuration = TimeSpan.Zero;
     private bool _updatingZoom;
     private HashSet<Guid> _selectedMarkerSet = [];
     private readonly DispatcherTimer _thumbRedrawTimer = new() { Interval = TimeSpan.FromMilliseconds(120) };
+    private readonly List<(AbridgedOverlay Overlay, double Left, double Right)> _previewHitRegions = [];
 
     public TimelineControl()
     {
@@ -117,16 +128,64 @@ public partial class TimelineControl : UserControl
         set => SetValue(SelectedDeletedRunIdProperty, value);
     }
 
+    public bool IsPreviewMode
+    {
+        get => (bool)GetValue(IsPreviewModeProperty);
+        set => SetValue(IsPreviewModeProperty, value);
+    }
+
+    public AbridgedTimelineLayout? AbridgedLayout
+    {
+        get => (AbridgedTimelineLayout?)GetValue(AbridgedLayoutProperty);
+        set => SetValue(AbridgedLayoutProperty, value);
+    }
+
     public event EventHandler<TimeSpan>? SeekRequested;
     public event EventHandler<Guid>? MarkerClicked;
     public event EventHandler<Guid>? DeletedRunSelected;
+    public event EventHandler? FadeInClicked;
+    public event EventHandler? FadeOutClicked;
+
+    private TimeSpan DisplayDuration
+    {
+        get
+        {
+            if (IsPreviewMode)
+                return AbridgedLayout?.Duration ?? TimeSpan.Zero;
+            return Timeline?.Duration ?? TimeSpan.Zero;
+        }
+    }
 
     private static void OnVisualPropertyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) =>
         ((TimelineControl)d).Redraw();
 
+    private static void OnPreviewModeChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        var control = (TimelineControl)d;
+        control.UpdateZoomBounds(forceFit: true);
+        control.Redraw();
+    }
+
+    private static void OnAbridgedLayoutChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        var control = (TimelineControl)d;
+        if (!control.IsPreviewMode)
+            return;
+        var newDuration = (e.NewValue as AbridgedTimelineLayout)?.Duration ?? TimeSpan.Zero;
+        var forceFit = newDuration != control._fittedDuration;
+        control.UpdateZoomBounds(forceFit);
+        control.Redraw();
+    }
+
     private static void OnTimelineChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         var control = (TimelineControl)d;
+        if (control.IsPreviewMode)
+        {
+            control.Redraw();
+            return;
+        }
+
         var newDuration = (e.NewValue as Timeline)?.Duration ?? TimeSpan.Zero;
         var forceFit = newDuration != control._fittedDuration;
         control.UpdateZoomBounds(forceFit);
@@ -215,7 +274,7 @@ public partial class TimelineControl : UserControl
 
     private double ComputeFitPixelsPerSecond()
     {
-        var durationSeconds = Timeline?.Duration.TotalSeconds ?? 0;
+        var durationSeconds = DisplayDuration.TotalSeconds;
         if (durationSeconds <= 0)
             return 4;
 
@@ -236,7 +295,7 @@ public partial class TimelineControl : UserControl
         {
             MinPixelsPerSecond = fit;
             MaxPixelsPerSecond = max;
-            _fittedDuration = Timeline?.Duration ?? TimeSpan.Zero;
+            _fittedDuration = DisplayDuration;
 
             if (forceFit || PixelsPerSecond < fit)
                 PixelsPerSecond = fit;
@@ -272,7 +331,112 @@ public partial class TimelineControl : UserControl
     {
         RootCanvas.Children.Clear();
         _playheadLine = null;
+        _previewHitRegions.Clear();
 
+        if (IsPreviewMode)
+        {
+            RedrawPreview();
+            return;
+        }
+
+        RedrawEdit();
+    }
+
+    private void RedrawPreview()
+    {
+        var layout = AbridgedLayout;
+        if (layout is null || layout.Duration <= TimeSpan.Zero)
+        {
+            SetCanvasWidth(Math.Max(400, GetViewportWidth()));
+            return;
+        }
+
+        var pps = Math.Max(MinPixelsPerSecond, PixelsPerSecond);
+        var viewport = GetViewportWidth();
+        var width = Math.Max(viewport > 1 ? viewport : 400, layout.Duration.TotalSeconds * pps);
+        SetCanvasWidth(width);
+
+        const double trackTop = 48;
+        const double trackHeight = 44;
+        var trackWidth = layout.Duration.TotalSeconds * pps;
+
+        var baseBar = new Rectangle
+        {
+            Width = Math.Max(1, trackWidth),
+            Height = trackHeight,
+            Fill = CreateFrozenBrush(0x32, 0x6E, 0x46),
+            Stroke = Brushes.Black,
+            StrokeThickness = 0.5,
+            IsHitTestVisible = false
+        };
+        Canvas.SetLeft(baseBar, 0);
+        Canvas.SetTop(baseBar, trackTop);
+        RootCanvas.Children.Add(baseBar);
+
+        foreach (var overlay in layout.Overlays)
+        {
+            var (left, right) = OverlayPixelBounds(overlay, pps, trackWidth);
+            _previewHitRegions.Add((overlay, left, right));
+
+            var rect = new Rectangle
+            {
+                Width = Math.Max(1, right - left),
+                Height = trackHeight,
+                Fill = OverlayBrush(overlay.Kind),
+                Stroke = SelectedDeletedRunId is Guid sel
+                         && overlay.DeletedRunId == sel
+                    ? Brushes.Gold
+                    : Brushes.Transparent,
+                StrokeThickness = SelectedDeletedRunId is Guid s2
+                                  && overlay.DeletedRunId == s2
+                    ? 2
+                    : 0,
+                Cursor = Cursors.Hand,
+                Tag = overlay
+            };
+            Canvas.SetLeft(rect, left);
+            Canvas.SetTop(rect, trackTop);
+            rect.MouseLeftButtonDown += (_, e) =>
+            {
+                HandleOverlayClick(overlay);
+                e.Handled = true;
+            };
+            RootCanvas.Children.Add(rect);
+
+            if (overlay.Kind is AbridgedOverlayKind.Crossfade or AbridgedOverlayKind.Cut)
+            {
+                var label = new TextBlock
+                {
+                    Text = overlay.Kind == AbridgedOverlayKind.Crossfade
+                        ? $"XF {(overlay.End - overlay.Start).TotalSeconds:0.##}s"
+                        : "Cut",
+                    Foreground = Brushes.White,
+                    FontSize = 10,
+                    IsHitTestVisible = false
+                };
+                Canvas.SetLeft(label, (left + right) / 2 - 12);
+                Canvas.SetTop(label, trackTop + trackHeight + 4);
+                RootCanvas.Children.Add(label);
+            }
+        }
+
+        // Topmost hit order: later overlays win; reverse list so cuts/xf drawn later are tested first.
+        _previewHitRegions.Reverse();
+
+        _playheadLine = new Line
+        {
+            Y1 = 0,
+            Y2 = 160,
+            Stroke = Brushes.White,
+            StrokeThickness = 1,
+            IsHitTestVisible = false
+        };
+        RootCanvas.Children.Add(_playheadLine);
+        UpdatePlayhead();
+    }
+
+    private void RedrawEdit()
+    {
         var timeline = Timeline;
         if (timeline is null || timeline.Duration <= TimeSpan.Zero)
         {
@@ -430,6 +594,68 @@ public partial class TimelineControl : UserControl
         UpdatePlayhead();
     }
 
+    private static (double Left, double Right) OverlayPixelBounds(
+        AbridgedOverlay overlay,
+        double pps,
+        double trackWidth)
+    {
+        var trueLeft = overlay.Start.TotalSeconds * pps;
+        var trueRight = overlay.End.TotalSeconds * pps;
+        var trueWidth = Math.Max(0, trueRight - trueLeft);
+        var width = Math.Max(trueWidth, MinOverlayPixels);
+
+        double left;
+        if (overlay.Kind == AbridgedOverlayKind.Cut || trueWidth < MinOverlayPixels)
+        {
+            // Expand around the true center so tiny fades/XFs stay clickable without shifting neighbors.
+            var center = overlay.Kind == AbridgedOverlayKind.Cut
+                ? trueLeft
+                : (trueLeft + trueRight) / 2;
+            left = center - width / 2;
+        }
+        else
+        {
+            left = trueLeft;
+        }
+
+        if (left < 0)
+            left = 0;
+        if (left + width > trackWidth && trackWidth > width)
+            left = trackWidth - width;
+
+        return (left, left + width);
+    }
+
+    private static Brush OverlayBrush(AbridgedOverlayKind kind) => kind switch
+    {
+        AbridgedOverlayKind.FadeIn => CreateFrozenBrush(0x2E, 0x86, 0xAB),
+        AbridgedOverlayKind.FadeOut => CreateFrozenBrush(0x2E, 0x86, 0xAB),
+        AbridgedOverlayKind.Crossfade => CreateFrozenBrush(0xE0, 0x8A, 0x2E),
+        AbridgedOverlayKind.Cut => CreateFrozenBrush(0xC4, 0x4E, 0x52),
+        _ => Brushes.Gray
+    };
+
+    private void HandleOverlayClick(AbridgedOverlay overlay)
+    {
+        switch (overlay.Kind)
+        {
+            case AbridgedOverlayKind.FadeIn:
+                FadeInClicked?.Invoke(this, EventArgs.Empty);
+                break;
+            case AbridgedOverlayKind.FadeOut:
+                FadeOutClicked?.Invoke(this, EventArgs.Empty);
+                break;
+            case AbridgedOverlayKind.Crossfade:
+            case AbridgedOverlayKind.Cut:
+                if (overlay.DeletedRunId is Guid id)
+                {
+                    DeletedRunSelected?.Invoke(this, id);
+                    SelectedDeletedRunId = id;
+                }
+                break;
+        }
+    }
+
     private void AddThumb(BitmapImage image, double left, double top, double width, double height)
     {
         var img = new Image
@@ -454,8 +680,18 @@ public partial class TimelineControl : UserControl
 
     private void UpdatePlayhead()
     {
-        if (_playheadLine is null || Timeline is null)
+        if (_playheadLine is null)
             return;
+
+        if (IsPreviewMode)
+        {
+            if (AbridgedLayout is null || AbridgedLayout.Duration <= TimeSpan.Zero)
+                return;
+        }
+        else if (Timeline is null)
+        {
+            return;
+        }
 
         var x = Playhead.TotalSeconds * Math.Max(MinPixelsPerSecond, PixelsPerSecond);
         _playheadLine.X1 = x;
@@ -488,12 +724,27 @@ public partial class TimelineControl : UserControl
 
     private void OnCanvasMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (Timeline is null)
+        var duration = DisplayDuration;
+        if (duration <= TimeSpan.Zero)
             return;
 
         var pps = Math.Max(MinPixelsPerSecond, PixelsPerSecond);
         var pos = e.GetPosition(RootCanvas);
-        var time = TimeSpan.FromSeconds(Math.Clamp(pos.X / pps, 0, Timeline.Duration.TotalSeconds));
+
+        if (IsPreviewMode)
+        {
+            foreach (var (overlay, left, right) in _previewHitRegions)
+            {
+                if (pos.X >= left && pos.X <= right)
+                {
+                    HandleOverlayClick(overlay);
+                    e.Handled = true;
+                    return;
+                }
+            }
+        }
+
+        var time = TimeSpan.FromSeconds(Math.Clamp(pos.X / pps, 0, duration.TotalSeconds));
         SeekRequested?.Invoke(this, time);
     }
 
