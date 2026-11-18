@@ -53,6 +53,10 @@ dotnet test tests/VideoAbridge.Tests/VideoAbridge.Tests.csproj
 dotnet test tests/VideoAbridge.FFmpeg.Tests/VideoAbridge.FFmpeg.Tests.csproj
 ```
 
+## Releases
+
+Pushes to `main` run [.github/workflows/release.yml](.github/workflows/release.yml): tests, publishes a self-contained `win-x64` build, and creates a GitHub Release (`v<year>.<month>.<run_number>`) with a zip asset. Put `[skip release]` in the commit message to skip. FFmpeg/ffprobe are not bundled—install them separately (see Requirements).
+
 ## Typical workflow
 
 1. **File → Open Video** — probes duration, restores cached versions/edits if present, resumes scene detection when needed.

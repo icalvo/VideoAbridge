@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: ${{ !contains(github.event.head_commit.message, '[skip release]') }}
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "11.0.x"
+
+      - name: Compute version
+        id: version
+        shell: bash
+        run: |
+          YEAR="$(date -u +%Y)"
+          MONTH="$(date -u +%m)"
+          MONTH=$((10#$MONTH))
+          VERSION="$YEAR.$MONTH.${{ github.run_number }}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Test
+        run: |
+          dotnet test tests/VideoAbridge.Core.Tests/VideoAbridge.Core.Tests.csproj -c Release --nologo
+          dotnet test tests/VideoAbridge.FFmpeg.Tests/VideoAbridge.FFmpeg.Tests.csproj -c Release --nologo
+          dotnet test tests/VideoAbridge.Tests/VideoAbridge.Tests.csproj -c Release --nologo
+
+      - name: Publish
+        run: >
+          dotnet publish src/VideoAbridge/VideoAbridge.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -o "${{ runner.temp }}/publish"
+          -p:Version=${{ steps.version.outputs.version }}
+          -p:InformationalVersion=${{ steps.version.outputs.version }}+${{ github.sha }}
+          -p:PublishSingleFile=false
+          --nologo
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP "VideoAbridge-${{ steps.version.outputs.tag }}-win-x64.zip"
+          Compress-Archive -Path (Join-Path $env:RUNNER_TEMP "publish\*") -DestinationPath $zip -Force
+          echo "ASSET=$zip" >> $env:GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: VideoAbridge ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+          files: ${{ env.ASSET }}
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
