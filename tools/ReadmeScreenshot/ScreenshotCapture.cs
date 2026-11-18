@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Drawing;
+using System.Runtime.InteropServices;
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Exceptions;
@@ -11,6 +13,8 @@ namespace ReadmeScreenshot;
 /// <summary>Launches VideoAbridge and captures the main window.</summary>
 internal static class ScreenshotCapture
 {
+    private const int DwmwaExtendedFrameBounds = 9;
+
     public static void Capture(
         string appPath,
         string videoPath,
@@ -53,7 +57,9 @@ internal static class ScreenshotCapture
             window.SetForeground();
             Thread.Sleep(settleDelay);
 
-            FlaUI.Core.Capturing.Capture.Element(window).ToFile(outputPath);
+            // UIA BoundingRectangle includes the DWM drop shadow; use the visible frame only.
+            var bounds = GetVisibleWindowBounds(window);
+            FlaUI.Core.Capturing.Capture.Rectangle(bounds).ToFile(outputPath);
         }
         finally
         {
@@ -67,6 +73,26 @@ internal static class ScreenshotCapture
                     app.Kill();
             }
         }
+    }
+
+    private static Rectangle GetVisibleWindowBounds(Window window)
+    {
+        var handle = new IntPtr(window.Properties.NativeWindowHandle.Value);
+        if (handle == IntPtr.Zero)
+            throw new InvalidOperationException("MainWindow has no native handle.");
+
+        if (DwmGetWindowAttribute(
+                handle,
+                DwmwaExtendedFrameBounds,
+                out var rect,
+                Marshal.SizeOf<NativeRect>()) == 0)
+        {
+            return Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom);
+        }
+
+        // Fallback if DWM is unavailable.
+        var bounds = window.BoundingRectangle;
+        return Rectangle.FromLTRB(bounds.Left, bounds.Top, bounds.Right, bounds.Bottom);
     }
 
     private static bool IsMainWindow(Window? main)
@@ -95,5 +121,22 @@ internal static class ScreenshotCapture
         {
             return false;
         }
+    }
+
+    [DllImport("dwmapi.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern int DwmGetWindowAttribute(
+        IntPtr hwnd,
+        int attribute,
+        out NativeRect rect,
+        int size);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
     }
 }
