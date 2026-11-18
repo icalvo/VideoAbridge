@@ -5,6 +5,7 @@
         xmlns:controls="clr-namespace:VideoAbridge.Controls"
         xmlns:vm="clr-namespace:VideoAbridge.ViewModels"
         Title="VideoAbridge"
+        AutomationProperties.AutomationId="MainWindow"
         Height="820"
         Width="1280"
         MinHeight="600"

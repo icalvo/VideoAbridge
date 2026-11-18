@@ -1,5 +1,7 @@
 # VideoAbridge
 
+![VideoAbridge](docs/readme-screenshot.png)
+
 **Mission:** make it easy to produce short versions of a **single, already edited** video.
 
 VideoAbridge is not a general NLE and not a multi-clip editor. You open one finished cut, mark what to drop, and export a tighter cut—with optional alternate abridgements of the same source—without rebuilding the timeline from scratch.
@@ -52,6 +54,17 @@ dotnet test VideoAbridge.slnx
 dotnet test tests/VideoAbridge.Tests/VideoAbridge.Tests.csproj
 dotnet test tests/VideoAbridge.FFmpeg.Tests/VideoAbridge.FFmpeg.Tests.csproj
 ```
+
+## README screenshot
+
+The hero image is captured automatically on **Windows** before `git push` (markers + one deleted section on a generated sample clip).
+
+```powershell
+pwsh tools/install-hooks.ps1          # once per clone: core.hooksPath=.githooks
+pwsh tools/capture-readme-screenshot.ps1   # manual refresh
+```
+
+If the PNG changes, the pre-push hook asks you to commit it and push again. Skip with `SKIP_README_SCREENSHOT=1 git push`.
 
 ## Releases
 

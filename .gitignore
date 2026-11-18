@@ -97,6 +97,9 @@ tools/ffmpeg/*.dll
 tools/ffmpeg/*.lib
 tools/ffmpeg/*.pdb
 
+# Generated README capture fixture (recreated by tools/capture-readme-screenshot.ps1)
+tools/fixtures/
+
 # Thumbnail / export scratch
 **/VideoAbridge/thumbs/
 *.vabproj.bak

@@ -25,7 +25,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly SceneDetector _sceneDetector = new();
     private readonly ThumbnailExtractor _thumbnails = new();
     private readonly VideoExporter _exporter = new();
-    private readonly MarkerCacheService _markerCache = new();
+    private readonly MarkerCacheService _markerCache = CreateMarkerCache();
     private readonly EditHistory _editHistory = new();
     private CancellationTokenSource? _exportCts;
     private CancellationTokenSource? _sceneDetectCts;
@@ -253,7 +253,22 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         await LoadVideoAsync(dialog.FileName, runSceneDetect: true).ConfigureAwait(true);
     }
 
-    public Task OpenVideoPathAsync(string path) => LoadVideoAsync(path, runSceneDetect: true);
+    public Task OpenVideoPathAsync(string path) =>
+        LoadVideoAsync(path, runSceneDetect: !IsSkipSceneDetectEnabled());
+
+    private static MarkerCacheService CreateMarkerCache()
+    {
+        var dir = Environment.GetEnvironmentVariable("VIDEOABRIDGE_MARKER_CACHE");
+        return string.IsNullOrWhiteSpace(dir)
+            ? new MarkerCacheService()
+            : new MarkerCacheService(dir);
+    }
+
+    private static bool IsSkipSceneDetectEnabled() =>
+        string.Equals(
+            Environment.GetEnvironmentVariable("VIDEOABRIDGE_SKIP_SCENE_DETECT"),
+            "1",
+            StringComparison.Ordinal);
 
     [RelayCommand(CanExecute = nameof(CanManageVersions))]
     private void CreateVersion()

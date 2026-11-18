@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net11.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>ReadmeScreenshot</RootNamespace>
+    <!-- CLI entrypoint catches user-facing failures intentionally. -->
+    <NoWarn>$(NoWarn);CA1812</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FlaUI.UIA3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\VideoAbridge\VideoAbridge.csproj" />
+    <ProjectReference Include="..\..\src\VideoAbridge.Core\VideoAbridge.Core.csproj" />
+    <ProjectReference Include="..\..\src\VideoAbridge.FFmpeg\VideoAbridge.FFmpeg.csproj" />
+  </ItemGroup>
+
+</Project>

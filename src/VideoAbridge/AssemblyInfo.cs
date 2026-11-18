@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 
 [assembly: InternalsVisibleTo("VideoAbridge.Tests")]
+[assembly: InternalsVisibleTo("ReadmeScreenshot")]
 
 [assembly: ThemeInfo(
     ResourceDictionaryLocation.None,            //where theme specific resource dictionaries are located
