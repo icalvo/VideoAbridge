@@ -68,7 +68,7 @@ If the PNG changes, the pre-push hook asks you to commit it and push again. Skip
 
 ## Releases
 
-Pushes to `main` run [.github/workflows/release.yml](.github/workflows/release.yml): tests, publishes a self-contained `win-x64` build, and creates a GitHub Release (`v<year>.<month>.<run_number>`) with a zip asset. Put `[skip release]` in the commit message to skip. FFmpeg/ffprobe are not bundled—install them separately (see Requirements).
+Pushes to `main` whose commit message contains `[release]` run [.github/workflows/release.yml](.github/workflows/release.yml): tests, publishes a self-contained `win-x64` build, and creates a GitHub Release (`v<year>.<month>.<run_number>`) with a zip asset. FFmpeg/ffprobe are not bundled—install them separately (see Requirements).
 
 ## Typical workflow
 
