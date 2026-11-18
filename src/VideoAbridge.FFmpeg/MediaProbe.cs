@@ -3,8 +3,6 @@ using System.Text.Json;
 
 namespace VideoAbridge.FFmpeg;
 
-public sealed record MediaInfo(TimeSpan Duration, int Width, int Height, double FrameRate);
-
 public sealed class MediaProbe(string? ffprobePath = null)
 {
     private readonly string _ffprobePath = ffprobePath ?? FFmpegLocator.FindFFprobe()

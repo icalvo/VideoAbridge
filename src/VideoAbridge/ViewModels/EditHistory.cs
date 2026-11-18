@@ -1,4 +1,3 @@
-using VideoAbridge.Core;
 
 namespace VideoAbridge.ViewModels;
 

@@ -1,0 +1,93 @@
+using System.IO;
+using System.Text.Json;
+using FluentAssertions;
+using VideoAbridge.Services;
+
+namespace VideoAbridge.Tests;
+
+public class MarkerCacheServiceTests
+{
+    [Fact]
+    public void SaveAndTryLoadRoundTripMultiVersion()
+    {
+        using var dir = new TempDir();
+        var video = dir.WriteFile("clip.bin", CreateBytes(200));
+        var duration = TimeSpan.FromSeconds(42);
+        var cache = new MarkerCacheService(Path.Combine(dir.Path, "MarkerCache"));
+
+        var set = AbridgedVersionSet.CreateDefault(duration);
+        set = set.ReplaceActiveTimeline(
+            set.ActiveTimeline.AddMarker(TimeSpan.FromSeconds(10), MarkerSource.User).RequireOk());
+        set = set.ReplaceActiveTimeline(set.ActiveTimeline.SetStartFade(1.25).RequireOk());
+        set = set.WithSceneDetectPosition(TimeSpan.FromSeconds(15));
+        set = set.CreateVersionFromScenes("Alt").RequireOk();
+        cache.SaveVersionSet(video, set);
+
+        var loaded = cache.TryLoadVersionSet(video, duration);
+        loaded.Should().NotBeNull();
+        loaded.Versions.Should().HaveCount(2);
+        loaded.Active.Name.Should().Be("Alt");
+        loaded.SceneDetectPosition.Should().Be(TimeSpan.FromSeconds(15));
+        loaded.Versions.First(v => v.Name == AbridgedVersionSet.DefaultVersionName)
+            .Timeline.Settings.FadeFromBlackSeconds.Should().Be(1.25);
+
+        var files = Directory.GetFiles(cache.CacheDirectory, "*.json");
+        files.Should().ContainSingle();
+        var text = File.ReadAllText(files[0]);
+        text.Should().Contain("versions");
+        text.Should().Contain("activeVersionId");
+        text.Should().Contain("\"name\": \"Alt\"");
+        text.Should().NotContain("fadeFromBlackAtStart");
+        text.Should().NotContain("videoPath");
+        using var doc = JsonDocument.Parse(text);
+        doc.RootElement.TryGetProperty("markers", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryLoadReturnsNullWhenDurationDoesNotMatch()
+    {
+        using var dir = new TempDir();
+        var video = dir.WriteFile("clip.bin", CreateBytes(200));
+        var cache = new MarkerCacheService(Path.Combine(dir.Path, "MarkerCache"));
+        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(42));
+        cache.SaveVersionSet(video, set);
+
+        cache.TryLoadVersionSet(video, TimeSpan.FromSeconds(43)).Should().BeNull();
+    }
+
+    private static byte[] CreateBytes(int length)
+    {
+        var bytes = new byte[length];
+        for (var i = 0; i < length; i++)
+            bytes[i] = (byte)(i & 0xFF);
+        return bytes;
+    }
+
+    private sealed class TempDir : IDisposable
+    {
+        public string Path { get; } = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(),
+            "VideoAbridgeTests_" + Guid.NewGuid().ToString("N"));
+
+        public TempDir() => Directory.CreateDirectory(Path);
+
+        public string WriteFile(string name, byte[] content)
+        {
+            var full = System.IO.Path.Combine(Path, name);
+            File.WriteAllBytes(full, content);
+            return full;
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                if (Directory.Exists(Path))
+                    Directory.Delete(Path, recursive: true);
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+}

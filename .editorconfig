@@ -20,6 +20,23 @@ dotnet_style_prefer_collection_expression = true:error
 dotnet_style_prefer_compound_assignment = true:error
 dotnet_style_null_propagation = true:error
 
+# StyleCop.Analyzers: silence the full rule set, then enforce one type per file only.
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.DocumentationRules.severity = none
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.LayoutRules.severity = none
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.MaintainabilityRules.severity = none
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.NamingRules.severity = none
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.OrderingRules.severity = none
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.ReadabilityRules.severity = none
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.SpacingRules.severity = none
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.SpecialRules.severity = none
+dotnet_diagnostic.SA0001.severity = none
+# SA1649 throws on union declarations (AD0001); leave file-name matching unenforced.
+dotnet_diagnostic.SA1649.severity = none
+
+# SA1402: each listed top-level kind must live in its own file (partials of one type OK).
+dotnet_diagnostic.SA1402.severity = error
+stylecop.maintainability.topLevelTypes = class, interface, enum
+
 # FluentAssertions returns AndConstraint<>; statement assertions are intentional.
 [tests/**/*.cs]
 dotnet_diagnostic.IDE0058.severity = silent

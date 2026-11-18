@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
-using static VideoAbridge.Core.Results;
 
-namespace VideoAbridge.Core;
+namespace VideoAbridge.Core.Editing;
 
 public sealed class Timeline
 {
@@ -59,9 +58,9 @@ public sealed class Timeline
     /// </summary>
     public static Timeline FromPersistedState(
         TimeSpan duration,
-        IReadOnlyList<Marker> markers,
-        IReadOnlyList<bool> segmentDeleted,
-        IReadOnlyList<JoinTransition> joins,
+        ImmutableList<Marker> markers,
+        ImmutableList<bool> segmentDeleted,
+        ImmutableList<JoinTransition> joins,
         ProjectSettings settings)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(duration, TimeSpan.Zero);
@@ -72,96 +71,51 @@ public sealed class Timeline
         if (segmentDeleted.Count != markers.Count + 1)
             throw new ArgumentException("Segment count must equal marker count + 1.");
 
-        var orderedMarkers = markers.OrderBy(m => m.Time).ToImmutableList();
-        var segments = segmentDeleted.Select(d => new SegmentState(d)).ToImmutableList();
-        var joinList = joins.ToImmutableList();
-        return new Timeline(duration, orderedMarkers, segments, joinList, settings);
+        ImmutableList<Marker> orderedMarkers = [.. markers.OrderBy(m => m.Time)];
+        ImmutableList<SegmentState> segments = [.. segmentDeleted.Select(d => new SegmentState(d))];
+        return new Timeline(duration, orderedMarkers, segments, joins, settings);
     }
 
-    public IReadOnlyList<TimeSpan> GetBoundaries()
-    {
-        List<TimeSpan> list = [with(capacity: Markers.Count + 2), TimeSpan.Zero, .. Markers.Select(m => m.Time), Duration];
-        return list;
-    }
+    public ImmutableList<TimeSpan> GetBoundaries() =>
+        [TimeSpan.Zero, .. Markers.Select(m => m.Time), Duration];
 
-    public IReadOnlyList<DeletedRun> GetDeletedRuns()
-    {
-        var ranges = CollectDeletedRanges();
-        var result = new List<DeletedRun>(ranges.Count);
-        var interiorIndex = 0;
-
-        foreach (var (start, end) in ranges)
-        {
-            var isInterior = start > TimeSpan.Zero && end < Duration;
-            if (!isInterior)
+    public ImmutableList<DeletedRun> GetDeletedRuns() =>
+        CollectDeletedRanges().Aggregate(
+            (Runs: ImmutableList<DeletedRun>.Empty, InteriorIndex: 0),
+            (state, range) =>
             {
-                var edgeId = start <= TimeSpan.Zero && end >= Duration
-                    ? FullDeletedRunId
-                    : start <= TimeSpan.Zero
-                        ? LeadingDeletedRunId
-                        : TrailingDeletedRunId;
-                result.Add(new DeletedRun(edgeId, start, end, false, null));
-                continue;
-            }
+                if (!range.IsInteriorOf(Duration))
+                {
+                    var edgeId = range.Covers(Duration)
+                        ? FullDeletedRunId
+                        : range.TouchesStart
+                            ? LeadingDeletedRunId
+                            : TrailingDeletedRunId;
+                    return (state.Runs.Add(new DeletedRun(edgeId, range, false, null)), state.InteriorIndex);
+                }
 
-            var join = interiorIndex < Joins.Count
-                ? Joins[interiorIndex]
-                : new JoinTransition(Guid.NewGuid(), TransitionMode.HardCut, 0);
-            interiorIndex++;
-            result.Add(new DeletedRun(join.DeletedRunId, start, end, true, join));
-        }
+                var join = state.InteriorIndex < Joins.Count
+                    ? Joins[state.InteriorIndex]
+                    : new JoinTransition(Guid.NewGuid(), TransitionMode.HardCut, 0);
+                return (
+                    state.Runs.Add(new DeletedRun(join.DeletedRunId, range, true, join)),
+                    state.InteriorIndex + 1);
+            }).Runs;
 
-        return result;
-    }
-
-    public IReadOnlyList<KeptRun> GetKeptRuns()
-    {
-        var boundaries = GetBoundaries();
-        var runs = new List<KeptRun>();
-        var i = 0;
-        while (i < Segments.Count)
-        {
-            if (Segments[i].IsDeleted)
-            {
-                i++;
-                continue;
-            }
-
-            var startIndex = i;
-            while (i < Segments.Count && !Segments[i].IsDeleted)
-                i++;
-
-            runs.Add(new KeptRun(boundaries[startIndex], boundaries[i]));
-        }
-
-        return runs;
-    }
+    public ImmutableList<TimeRange> GetKeptRuns() =>
+        CollectContiguousSegmentRanges(deleted: false);
 
     /// <summary>Total duration of all non-deleted sections (the abridged output length).</summary>
-    public TimeSpan GetAbridgedDuration()
-    {
-        var total = TimeSpan.Zero;
-        foreach (var run in GetKeptRuns())
-            total += run.Duration;
-        return total;
-    }
+    public TimeSpan GetAbridgedDuration() =>
+        GetKeptRuns().Aggregate(TimeSpan.Zero, (total, run) => total + run.Duration);
 
     /// <summary>
     /// True when <paramref name="time"/> falls inside a kept section (inclusive of both ends).
     /// </summary>
-    public bool IsKeptTime(TimeSpan time)
-    {
-        if (time < TimeSpan.Zero || time > Duration)
-            return false;
-
-        foreach (var run in GetKeptRuns())
-        {
-            if (time >= run.Start && time <= run.End)
-                return true;
-        }
-
-        return false;
-    }
+    public bool IsKeptTime(TimeSpan time) =>
+        time >= TimeSpan.Zero
+        && time <= Duration
+        && GetKeptRuns().Any(run => run.Contains(time));
 
     /// <summary>
     /// Snaps <paramref name="time"/> to itself when kept, otherwise to the nearest kept edge.
@@ -178,28 +132,16 @@ public sealed class Timeline
         else if (time > Duration)
             time = Duration;
 
-        foreach (var run in kept)
-        {
-            if (time >= run.Start && time <= run.End)
-                return time;
-        }
+        if (kept.Any(run => run.Contains(time)))
+            return time;
 
-        var best = kept[0].Start;
-        var bestDist = AbsDiff(time, best);
-        foreach (var run in kept)
-        {
-            foreach (var edge in (TimeSpan[])[run.Start, run.End])
+        return kept.Aggregate(
+            kept[0].NearestEdge(time),
+            (best, run) =>
             {
-                var dist = AbsDiff(time, edge);
-                if (dist < bestDist)
-                {
-                    bestDist = dist;
-                    best = edge;
-                }
-            }
-        }
-
-        return best;
+                var candidate = run.NearestEdge(time);
+                return AbsDiff(time, candidate) < AbsDiff(time, best) ? candidate : best;
+            });
     }
 
     public Result<Timeline> AddMarker(TimeSpan time, MarkerSource source) =>
@@ -235,6 +177,13 @@ public sealed class Timeline
         if (index < 0)
             return Fail<Timeline>("MarkerNotFound", "Marker was not found.");
 
+        if (Markers[index].Source == MarkerSource.SceneDetect)
+        {
+            return Fail<Timeline>(
+                "SceneMarkerProtected",
+                "Scene-detect markers cannot be deleted.");
+        }
+
         if (Segments[index].IsDeleted != Segments[index + 1].IsDeleted)
         {
             return Fail<Timeline>(
@@ -260,7 +209,8 @@ public sealed class Timeline
         if (run is null)
             return Fail<Timeline>("DeletedRunNotFound", "Deleted run was not found.");
 
-        if (!TryGetBoundaryIdAt(run.Start, out var left) || !TryGetBoundaryIdAt(run.End, out var right))
+        if (!TryGetBoundaryIdAt(run.Range.Start, out var left)
+            || !TryGetBoundaryIdAt(run.Range.End, out var right))
             return Fail<Timeline>("BoundaryNotFound", "Could not resolve deleted run boundaries.");
 
         return RestoreBetween(left, right);
@@ -287,7 +237,7 @@ public sealed class Timeline
         if (run is null || !run.IsInterior)
             return Fail<Timeline>("JoinNotInterior", "Crossfade requires an interior deleted run.");
 
-        var cap = GetCrossfadeCap(run.Start, run.End);
+        var cap = GetCrossfadeCap(run.Range);
         if (cap <= 0)
             return Fail<Timeline>("CrossfadeCapZero", "Adjacent kept sections are too short for a crossfade.");
 
@@ -303,53 +253,39 @@ public sealed class Timeline
             Duration, Markers, Segments, Joins.SetItem(index, updated), Settings));
     }
 
-    public Result<Timeline> SetStartFade(bool enabled, double seconds)
+    /// <summary>Sets start fade; <paramref name="seconds"/> null disables fade-from-black.</summary>
+    public Result<Timeline> SetStartFade(double? seconds)
     {
-        if (enabled)
+        if (seconds is { } value)
         {
             var max = GetStartFadeCap();
-            if (seconds < 0 || seconds > max + 1e-9)
+            if (value < 0 || value > max + 1e-9)
             {
                 return Fail<Timeline>(
                     "StartFadeOutOfRange",
                     $"Start fade must be between 0 and {max:0.###} seconds.");
             }
         }
-        else if (seconds < 0)
-        {
-            return Fail<Timeline>("StartFadeOutOfRange", "Start fade seconds cannot be negative.");
-        }
 
-        var settings = Settings with
-        {
-            FadeFromBlackAtStart = enabled,
-            FadeFromBlackSeconds = enabled ? seconds : 0
-        };
+        var settings = Settings with { FadeFromBlackSeconds = seconds };
         return Ok(new Timeline(Duration, Markers, Segments, Joins, settings));
     }
 
-    public Result<Timeline> SetEndFade(bool enabled, double seconds)
+    /// <summary>Sets end fade; <paramref name="seconds"/> null disables fade-to-black.</summary>
+    public Result<Timeline> SetEndFade(double? seconds)
     {
-        if (enabled)
+        if (seconds is { } value)
         {
             var max = GetEndFadeCap();
-            if (seconds < 0 || seconds > max + 1e-9)
+            if (value < 0 || value > max + 1e-9)
             {
                 return Fail<Timeline>(
                     "EndFadeOutOfRange",
                     $"End fade must be between 0 and {max:0.###} seconds.");
             }
         }
-        else if (seconds < 0)
-        {
-            return Fail<Timeline>("EndFadeOutOfRange", "End fade seconds cannot be negative.");
-        }
 
-        var settings = Settings with
-        {
-            FadeToBlackAtEnd = enabled,
-            FadeToBlackSeconds = enabled ? seconds : 0
-        };
+        var settings = Settings with { FadeToBlackSeconds = seconds };
         return Ok(new Timeline(Duration, Markers, Segments, Joins, settings));
     }
 
@@ -359,13 +295,13 @@ public sealed class Timeline
         if (kept.Count == 0)
             return Fail<ExportPlan>("NothingToExport", "There is no kept material to export.");
 
-        var clips = kept.Select(k => new KeptClip(k.Start, k.End)).ToList();
-        var deleted = GetDeletedRuns().Where(r => r.IsInterior).ToList();
+        ImmutableList<TimeRange> clips = [.. kept];
+        ImmutableList<DeletedRun> deleted = [.. GetDeletedRuns().Where(r => r.IsInterior)];
 
         if (clips.Count != deleted.Count + 1)
             return Fail<ExportPlan>("InconsistentRuns", "Kept/deleted run topology is inconsistent.");
 
-        var joins = new List<ExportJoin>(deleted.Count);
+        var joins = ImmutableList.CreateBuilder<ExportJoin>();
         for (var i = 0; i < deleted.Count; i++)
         {
             var run = deleted[i];
@@ -382,16 +318,14 @@ public sealed class Timeline
                 join.Mode == TransitionMode.Crossfade ? join.CrossfadeSeconds : 0));
         }
 
-        var startFadeSeconds = Settings.FadeFromBlackAtStart ? Settings.FadeFromBlackSeconds : 0;
-        if (Settings.FadeFromBlackAtStart)
+        if (Settings.FadeFromBlackSeconds is { } startFadeSeconds)
         {
             var max = GetStartFadeCap();
             if (startFadeSeconds < 0 || startFadeSeconds > max + 1e-9)
                 return Fail<ExportPlan>("InvalidStartFade", "Start fade exceeds the first kept section.");
         }
 
-        var endFadeSeconds = Settings.FadeToBlackAtEnd ? Settings.FadeToBlackSeconds : 0;
-        if (Settings.FadeToBlackAtEnd)
+        if (Settings.FadeToBlackSeconds is { } endFadeSeconds)
         {
             var max = GetEndFadeCap();
             if (endFadeSeconds < 0 || endFadeSeconds > max + 1e-9)
@@ -400,21 +334,21 @@ public sealed class Timeline
 
         return Ok(new ExportPlan(
             clips,
-            joins,
-            Settings.FadeFromBlackAtStart,
-            startFadeSeconds,
-            Settings.FadeToBlackAtEnd,
-            endFadeSeconds));
+            joins.ToImmutable(),
+            Settings.FadeFromBlackSeconds,
+            Settings.FadeToBlackSeconds));
     }
 
-    public double GetCrossfadeCap(TimeSpan deletedStart, TimeSpan deletedEnd)
+    public double GetCrossfadeCap(TimeRange deleted)
     {
         var kept = GetKeptRuns();
-        var before = kept.LastOrDefault(k => k.End <= deletedStart + MarkerEpsilon);
-        var after = kept.FirstOrDefault(k => k.Start >= deletedEnd - MarkerEpsilon);
-        if (before is null || after is null)
+        var beforeIndex = kept.FindLastIndex(k => k.End <= deleted.Start + MarkerEpsilon);
+        var afterIndex = kept.FindIndex(k => k.Start >= deleted.End - MarkerEpsilon);
+        if (beforeIndex < 0 || afterIndex < 0)
             return 0;
-        return Math.Min(before.Duration.TotalSeconds, after.Duration.TotalSeconds);
+        return Math.Min(
+            kept[beforeIndex].Duration.TotalSeconds,
+            kept[afterIndex].Duration.TotalSeconds);
     }
 
     /// <summary>
@@ -430,7 +364,7 @@ public sealed class Timeline
         var first = kept[0];
         var available = first.Duration.TotalSeconds;
 
-        var interiorDeleted = GetDeletedRuns().Where(r => r.IsInterior).ToList();
+        ImmutableList<DeletedRun> interiorDeleted = [.. GetDeletedRuns().Where(r => r.IsInterior)];
         if (kept.Count >= 2 && interiorDeleted.Count >= 1)
         {
             var outgoing = interiorDeleted[0].Join;
@@ -454,7 +388,7 @@ public sealed class Timeline
         var last = kept[^1];
         var available = last.Duration.TotalSeconds;
 
-        var interiorDeleted = GetDeletedRuns().Where(r => r.IsInterior).ToList();
+        ImmutableList<DeletedRun> interiorDeleted = [.. GetDeletedRuns().Where(r => r.IsInterior)];
         if (kept.Count >= 2 && interiorDeleted.Count >= kept.Count - 1)
         {
             var incoming = interiorDeleted[kept.Count - 2].Join;
@@ -537,141 +471,123 @@ public sealed class Timeline
         return true;
     }
 
-    private List<(TimeSpan Start, TimeSpan End, JoinTransition Join)> SnapshotInteriorRuns()
+    private ImmutableList<InteriorRunSnapshot> SnapshotInteriorRuns()
     {
-        var ranges = CollectDeletedRanges()
-            .Where(r => r.Start > TimeSpan.Zero && r.End < Duration)
-            .ToList();
+        ImmutableList<TimeRange> ranges =
+        [
+            .. CollectDeletedRanges().Where(r => r.IsInteriorOf(Duration))
+        ];
 
-        var list = new List<(TimeSpan, TimeSpan, JoinTransition)>(ranges.Count);
-        for (var i = 0; i < ranges.Count; i++)
-        {
-            var join = i < Joins.Count
-                ? Joins[i]
-                : new JoinTransition(Guid.NewGuid(), TransitionMode.HardCut, 0);
-            list.Add((ranges[i].Start, ranges[i].End, join));
-        }
-
-        return list;
+        return
+        [
+            .. ranges.Select((range, i) => new InteriorRunSnapshot(
+                range,
+                i < Joins.Count
+                    ? Joins[i]
+                    : new JoinTransition(Guid.NewGuid(), TransitionMode.HardCut, 0)))
+        ];
     }
 
-    private List<(TimeSpan Start, TimeSpan End)> CollectDeletedRanges()
+    private ImmutableList<TimeRange> CollectDeletedRanges() =>
+        CollectContiguousSegmentRanges(deleted: true);
+
+    private ImmutableList<TimeRange> CollectContiguousSegmentRanges(bool deleted)
     {
         var boundaries = GetBoundaries();
-        var ranges = new List<(TimeSpan, TimeSpan)>();
+        var ranges = ImmutableList.CreateBuilder<TimeRange>();
         var i = 0;
         while (i < Segments.Count)
         {
-            if (!Segments[i].IsDeleted)
+            if (Segments[i].IsDeleted != deleted)
             {
                 i++;
                 continue;
             }
 
             var startIndex = i;
-            while (i < Segments.Count && Segments[i].IsDeleted)
+            while (i < Segments.Count && Segments[i].IsDeleted == deleted)
                 i++;
 
-            ranges.Add((boundaries[startIndex], boundaries[i]));
+            ranges.Add(new TimeRange(boundaries[startIndex], boundaries[i]));
         }
 
-        return ranges;
+        return ranges.ToImmutable();
     }
 
     private static Timeline Rebuild(
         TimeSpan duration,
         ImmutableList<Marker> markers,
         ImmutableList<SegmentState> segments,
-        List<(TimeSpan Start, TimeSpan End, JoinTransition Join)> oldInteriorRuns,
+        ImmutableList<InteriorRunSnapshot> oldInteriorRuns,
         ProjectSettings settings)
     {
         var probe = new Timeline(
             duration, markers, segments, [], settings);
 
-        var newRanges = probe.CollectDeletedRanges()
-            .Where(r => r.Start > TimeSpan.Zero && r.End < duration)
-            .ToList();
+        ImmutableList<TimeRange> newRanges =
+        [
+            .. probe.CollectDeletedRanges().Where(r => r.IsInteriorOf(duration))
+        ];
 
-        var newJoins = ImmutableList.CreateBuilder<JoinTransition>();
-        foreach (var (start, end) in newRanges)
-        {
-            var overlappingOld = oldInteriorRuns
-                .Where(old => RangesOverlap(old.Start, old.End, start, end))
-                .ToList();
-
-            // Preserve only for 1:1 expand/shrink. Split (1 old → many new) and
-            // coalesce (many old → 1 new) both reset to HardCut.
-            var isOneToOne = overlappingOld.Count == 1
-                && newRanges.Count(n => RangesOverlap(overlappingOld[0].Start, overlappingOld[0].End, n.Start, n.End)) == 1;
-
-            var join = isOneToOne
-                ? overlappingOld[0].Join
-                : new JoinTransition(Guid.NewGuid(), TransitionMode.HardCut, 0);
-
-            if (join.Mode == TransitionMode.Crossfade)
+        ImmutableList<JoinTransition> newJoins =
+        [
+            .. newRanges.Select(range =>
             {
-                var cap = probe.GetCrossfadeCap(start, end);
-                if (cap <= 0 || join.CrossfadeSeconds <= 0)
-                    join = join with { Mode = TransitionMode.HardCut, CrossfadeSeconds = 0 };
-                else if (join.CrossfadeSeconds > cap)
-                    join = join with { CrossfadeSeconds = cap };
-            }
+                ImmutableList<InteriorRunSnapshot> overlappingOld =
+                [
+                    .. oldInteriorRuns.Where(old => old.Range.Overlaps(range))
+                ];
 
-            newJoins.Add(join);
-        }
+                // Preserve only for 1:1 expand/shrink. Split (1 old → many new) and
+                // coalesce (many old → 1 new) both reset to HardCut.
+                var isOneToOne = overlappingOld.Count == 1
+                    && newRanges.Count(n => overlappingOld[0].Range.Overlaps(n)) == 1;
+
+                var join = isOneToOne
+                    ? overlappingOld[0].Join
+                    : new JoinTransition(Guid.NewGuid(), TransitionMode.HardCut, 0);
+
+                if (join.Mode != TransitionMode.Crossfade)
+                    return join;
+
+                var cap = probe.GetCrossfadeCap(range);
+                if (cap <= 0 || join.CrossfadeSeconds <= 0)
+                    return join with { Mode = TransitionMode.HardCut, CrossfadeSeconds = 0 };
+                if (join.CrossfadeSeconds > cap)
+                    return join with { CrossfadeSeconds = cap };
+                return join;
+            })
+        ];
 
         settings = ClampSettings(probe, settings);
-        return new Timeline(duration, markers, segments, newJoins.ToImmutable(), settings);
+        return new Timeline(duration, markers, segments, newJoins, settings);
     }
 
     private static ProjectSettings ClampSettings(Timeline probe, ProjectSettings settings)
     {
-        var startEnabled = settings.FadeFromBlackAtStart;
-        var startSeconds = settings.FadeFromBlackSeconds;
-        var endEnabled = settings.FadeToBlackAtEnd;
-        var endSeconds = settings.FadeToBlackSeconds;
+        double? startSeconds = settings.FadeFromBlackSeconds;
+        double? endSeconds = settings.FadeToBlackSeconds;
 
-        if (startEnabled)
+        if (startSeconds is { } start)
         {
             var max = probe.GetStartFadeCap();
             if (max <= 0)
-            {
-                startEnabled = false;
-                startSeconds = 0;
-            }
-            else if (startSeconds > max)
-            {
+                startSeconds = null;
+            else if (start > max)
                 startSeconds = max;
-            }
-        }
-        else
-        {
-            startSeconds = 0;
         }
 
-        if (endEnabled)
+        if (endSeconds is { } end)
         {
             var max = probe.GetEndFadeCap();
             if (max <= 0)
-            {
-                endEnabled = false;
-                endSeconds = 0;
-            }
-            else if (endSeconds > max)
-            {
+                endSeconds = null;
+            else if (end > max)
                 endSeconds = max;
-            }
-        }
-        else
-        {
-            endSeconds = 0;
         }
 
-        return new ProjectSettings(startEnabled, startSeconds, endEnabled, endSeconds);
+        return new ProjectSettings(startSeconds, endSeconds);
     }
-
-    private static bool RangesOverlap(TimeSpan aStart, TimeSpan aEnd, TimeSpan bStart, TimeSpan bEnd) =>
-        aStart < bEnd && bStart < aEnd;
 
     private static TimeSpan AbsDiff(TimeSpan a, TimeSpan b) => a > b ? a - b : b - a;
 }

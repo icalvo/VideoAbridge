@@ -7,20 +7,9 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
-using VideoAbridge.Core;
 using VideoAbridge.ViewModels;
 
 namespace VideoAbridge.Controls;
-
-public sealed class TimeSpanEventArgs(TimeSpan time) : EventArgs
-{
-    public TimeSpan Time { get; } = time;
-}
-
-public sealed class GuidEventArgs(Guid id) : EventArgs
-{
-    public Guid Id { get; } = id;
-}
 
 public partial class TimelineControl : UserControl
 {
@@ -365,6 +354,67 @@ public partial class TimelineControl : UserControl
         }
     }
 
+    /// <summary>Fit the entire displayed timeline in the viewport (full zoom out).</summary>
+    public void ZoomToFit()
+    {
+        UpdateZoomBounds(forceFit: true);
+        Redraw();
+        UpdateLayout();
+        Scroller.ScrollToHorizontalOffset(0);
+    }
+
+    /// <summary>
+    /// Zoom so all undeleted (kept) sections fit in the viewport.
+    /// In preview mode the display is already abridged, so this matches <see cref="ZoomToFit"/>.
+    /// </summary>
+    public void ZoomToContent()
+    {
+        if (IsPreviewMode || Timeline is null)
+        {
+            ZoomToFit();
+            return;
+        }
+
+        var kept = Timeline.GetKeptRuns();
+        if (kept.Count == 0)
+        {
+            ZoomToFit();
+            return;
+        }
+
+        var start = kept[0].Start;
+        var end = kept[^1].End;
+        var contentSeconds = (end - start).TotalSeconds;
+        if (contentSeconds <= 1e-9)
+        {
+            ZoomToFit();
+            return;
+        }
+
+        UpdateZoomBounds(forceFit: false);
+        var viewport = GetViewportWidth();
+        if (viewport <= 1)
+            return;
+
+        var min = MinPixelsPerSecond;
+        var max = Math.Max(MaxPixelsPerSecond, min);
+        var newPps = Math.Clamp(viewport / contentSeconds, min, max);
+
+        _updatingZoom = true;
+        try
+        {
+            PixelsPerSecond = newPps;
+        }
+        finally
+        {
+            _updatingZoom = false;
+        }
+
+        Redraw();
+        UpdateLayout();
+        Scroller.ScrollToHorizontalOffset(Math.Max(0, start.TotalSeconds * newPps));
+    }
+
     private void ClampPixelsPerSecond()
     {
         var min = MinPixelsPerSecond;
@@ -435,19 +485,18 @@ public partial class TimelineControl : UserControl
             var (left, right) = OverlayPixelBounds(overlay, pps, trackWidth);
             _previewHitRegions.Add((overlay, left, right));
 
+            var selectedInterior = overlay.Value is InteriorOverlay interior
+                && SelectedDeletedRunId is Guid sel
+                && interior.DeletedRunId == sel
+                && interior.DeletedRunId != Guid.Empty;
+
             var rect = new Rectangle
             {
                 Width = Math.Max(1, right - left),
                 Height = trackHeight,
-                Fill = OverlayBrush(overlay.Kind),
-                Stroke = SelectedDeletedRunId is Guid sel
-                         && overlay.DeletedRunId == sel
-                    ? Brushes.Gold
-                    : Brushes.Transparent,
-                StrokeThickness = SelectedDeletedRunId is Guid s2
-                                  && overlay.DeletedRunId == s2
-                    ? 2
-                    : 0,
+                Fill = OverlayBrush(overlay),
+                Stroke = selectedInterior ? Brushes.Gold : Brushes.Transparent,
+                StrokeThickness = selectedInterior ? 2 : 0,
                 Cursor = Cursors.Hand,
                 Tag = overlay
             };
@@ -460,12 +509,12 @@ public partial class TimelineControl : UserControl
             };
             RootCanvas.Children.Add(rect);
 
-            if (overlay.Kind is AbridgedOverlayKind.Crossfade or AbridgedOverlayKind.Cut)
+            if (overlay.Value is InteriorOverlay joinOverlay)
             {
                 var label = new TextBlock
                 {
-                    Text = overlay.Kind == AbridgedOverlayKind.Crossfade
-                        ? $"XF {(overlay.End - overlay.Start).TotalSeconds:0.##}s"
+                    Text = joinOverlay.Mode == TransitionMode.Crossfade
+                        ? $"XF {joinOverlay.Range.Duration.TotalSeconds:0.##}s"
                         : "Cut",
                     Foreground = Brushes.White,
                     FontSize = 10,
@@ -534,8 +583,8 @@ public partial class TimelineControl : UserControl
 
         foreach (var run in timeline.GetDeletedRuns())
         {
-            var left = run.Start.TotalSeconds * pps;
-            var right = run.End.TotalSeconds * pps;
+            var left = run.Range.Start.TotalSeconds * pps;
+            var right = run.Range.End.TotalSeconds * pps;
             var mid = (left + right) / 2;
             var labelText = DeletedRunLabel(run, timeline.Duration);
             var label = new TextBlock
@@ -657,16 +706,17 @@ public partial class TimelineControl : UserControl
         double pps,
         double trackWidth)
     {
-        var trueLeft = overlay.Start.TotalSeconds * pps;
-        var trueRight = overlay.End.TotalSeconds * pps;
+        var trueLeft = overlay.Range.Start.TotalSeconds * pps;
+        var trueRight = overlay.Range.End.TotalSeconds * pps;
         var trueWidth = Math.Max(0, trueRight - trueLeft);
         var width = Math.Max(trueWidth, MinOverlayPixels);
+        var isHardCut = overlay.Value is InteriorOverlay { Mode: TransitionMode.HardCut };
 
         double left;
-        if (overlay.Kind == AbridgedOverlayKind.Cut || trueWidth < MinOverlayPixels)
+        if (isHardCut || trueWidth < MinOverlayPixels)
         {
             // Expand around the true center so tiny fades/XFs stay clickable without shifting neighbors.
-            var center = overlay.Kind == AbridgedOverlayKind.Cut
+            var center = isHardCut
                 ? trueLeft
                 : (trueLeft + trueRight) / 2;
             left = center - width / 2;
@@ -693,42 +743,34 @@ public partial class TimelineControl : UserControl
                 : "Cut";
         }
 
-        if (run.Start <= TimeSpan.Zero && run.End >= duration)
+        if (run.Range.Covers(duration))
             return "All";
-        if (run.Start <= TimeSpan.Zero)
+        if (run.Range.TouchesStart)
             return "Begin";
         return "End";
     }
 
-    private static SolidColorBrush OverlayBrush(AbridgedOverlayKind kind) => kind switch
+    private static SolidColorBrush OverlayBrush(AbridgedOverlay overlay) => overlay switch
     {
-        AbridgedOverlayKind.FadeIn => CreateFrozenBrush(0x2E, 0x86, 0xAB),
-        AbridgedOverlayKind.FadeOut => CreateFrozenBrush(0x2E, 0x86, 0xAB),
-        AbridgedOverlayKind.Crossfade => CreateFrozenBrush(0xE0, 0x8A, 0x2E),
-        AbridgedOverlayKind.Cut => CreateFrozenBrush(0xC4, 0x4E, 0x52),
-        _ => (SolidColorBrush)Brushes.Gray
+        ExteriorOverlay => CreateFrozenBrush(0x2E, 0x86, 0xAB),
+        InteriorOverlay { Mode: TransitionMode.Crossfade } => CreateFrozenBrush(0xE0, 0x8A, 0x2E),
+        InteriorOverlay => CreateFrozenBrush(0xC4, 0x4E, 0x52)
     };
 
     private void HandleOverlayClick(AbridgedOverlay overlay)
     {
-        switch (overlay.Kind)
+        if (overlay is ExteriorOverlay { Kind: ExteriorOverlayKind.FadeIn })
         {
-            case AbridgedOverlayKind.FadeIn:
-                FadeInClicked?.Invoke(this, EventArgs.Empty);
-                break;
-            case AbridgedOverlayKind.FadeOut:
-                FadeOutClicked?.Invoke(this, EventArgs.Empty);
-                break;
-            case AbridgedOverlayKind.Crossfade:
-            case AbridgedOverlayKind.Cut:
-                if (overlay.DeletedRunId is Guid id)
-                {
-                    DeletedRunSelected?.Invoke(this, new GuidEventArgs(id));
-                    SelectedDeletedRunId = id;
-                }
-                break;
-            default:
-                break;
+            FadeInClicked?.Invoke(this, EventArgs.Empty);
+        }
+        else if (overlay is ExteriorOverlay { Kind: ExteriorOverlayKind.FadeOut })
+        {
+            FadeOutClicked?.Invoke(this, EventArgs.Empty);
+        }
+        else if (overlay is InteriorOverlay { DeletedRunId: var id } && id != Guid.Empty)
+        {
+            DeletedRunSelected?.Invoke(this, new GuidEventArgs(id));
+            SelectedDeletedRunId = id;
         }
     }
 

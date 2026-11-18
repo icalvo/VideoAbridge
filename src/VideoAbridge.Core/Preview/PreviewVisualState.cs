@@ -1,14 +1,24 @@
-namespace VideoAbridge.Core;
+namespace VideoAbridge.Core.Preview;
 
 /// <summary>
-/// Realtime preview evaluation: given the primary player's source time,
-/// describes cut jumps, crossfade blending, and fade-to/from-black overlays.
+/// Realtime preview frame state: playhead, cut jumps, crossfade blend, and fade overlays.
 /// </summary>
-public static class PreviewComposer
+public readonly record struct PreviewVisualState(
+    TimeSpan PlayheadSourceTime,
+    TimeSpan AbridgedTime,
+    double BlackoutOpacity,
+    bool InCrossfade,
+    TimeSpan IncomingSourceTime,
+    double IncomingOpacity,
+    TimeSpan? JumpPrimaryTo,
+    bool PreviewComplete)
 {
     /// <summary>~1 frame at 24fps — avoid TimeSpan tick noise around cut boundaries.</summary>
     public const double FrameEpsilonSeconds = 1.0 / 24.0;
 
+    /// <summary>
+    /// Evaluates preview visuals for the primary player's source time against an export plan.
+    /// </summary>
     public static PreviewVisualState Evaluate(ExportPlan plan, PreviewTimeMap map, TimeSpan primarySourceTime)
     {
         ArgumentNullException.ThrowIfNull(plan);
@@ -66,7 +76,7 @@ public static class PreviewComposer
                 return new PreviewVisualState(
                     playhead,
                     abridged,
-                    BlackoutOpacity(plan, abridged, total),
+                    BlackoutOpacityFor(plan, abridged, total),
                     false,
                     TimeSpan.Zero,
                     0,
@@ -87,7 +97,7 @@ public static class PreviewComposer
                 return new PreviewVisualState(
                     playhead,
                     abridged,
-                    BlackoutOpacity(plan, abridged, total),
+                    BlackoutOpacityFor(plan, abridged, total),
                     true,
                     incomingTime,
                     u,
@@ -104,7 +114,7 @@ public static class PreviewComposer
                 return new PreviewVisualState(
                     jumpTo,
                     map.ToAbridged(jumpTo),
-                    BlackoutOpacity(plan, map.ToAbridged(jumpTo), total),
+                    BlackoutOpacityFor(plan, map.ToAbridged(jumpTo), total),
                     false,
                     TimeSpan.Zero,
                     0,
@@ -119,7 +129,7 @@ public static class PreviewComposer
                 return new PreviewVisualState(
                     end,
                     total,
-                    BlackoutOpacity(plan, total, total),
+                    BlackoutOpacityFor(plan, total, total),
                     false,
                     TimeSpan.Zero,
                     0,
@@ -137,7 +147,7 @@ public static class PreviewComposer
             return new PreviewVisualState(
                 jumpTo,
                 map.ToAbridged(jumpTo),
-                BlackoutOpacity(plan, map.ToAbridged(jumpTo), total),
+                BlackoutOpacityFor(plan, map.ToAbridged(jumpTo), total),
                 false,
                 TimeSpan.Zero,
                 0,
@@ -150,7 +160,7 @@ public static class PreviewComposer
         return new PreviewVisualState(
             playheadFallback,
             map.ToAbridged(playheadFallback),
-            BlackoutOpacity(plan, map.ToAbridged(playheadFallback), total),
+            BlackoutOpacityFor(plan, map.ToAbridged(playheadFallback), total),
             false,
             TimeSpan.Zero,
             0,
@@ -158,23 +168,19 @@ public static class PreviewComposer
             PreviewComplete: false);
     }
 
-    private static double BlackoutOpacity(ExportPlan plan, TimeSpan abridged, TimeSpan total)
+    private static double BlackoutOpacityFor(ExportPlan plan, TimeSpan abridged, TimeSpan total)
     {
         var t = abridged.TotalSeconds;
         var dur = Math.Max(total.TotalSeconds, 1e-6);
         var opacity = 0.0;
 
-        if (plan.FadeFromBlackAtStart && plan.FadeFromBlackSeconds > 0)
-        {
-            var d = plan.FadeFromBlackSeconds;
-            opacity = Math.Max(opacity, 1.0 - Math.Clamp(t / d, 0, 1));
-        }
+        if (plan.FadeFromBlackSeconds is > 0 and var fadeIn)
+            opacity = Math.Max(opacity, 1.0 - Math.Clamp(t / fadeIn, 0, 1));
 
-        if (plan.FadeToBlackAtEnd && plan.FadeToBlackSeconds > 0)
+        if (plan.FadeToBlackSeconds is > 0 and var fadeOut)
         {
-            var d = plan.FadeToBlackSeconds;
-            var start = dur - d;
-            opacity = Math.Max(opacity, Math.Clamp((t - start) / d, 0, 1));
+            var start = dur - fadeOut;
+            opacity = Math.Max(opacity, Math.Clamp((t - start) / fadeOut, 0, 1));
         }
 
         return Math.Clamp(opacity, 0, 1);

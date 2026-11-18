@@ -1,5 +1,4 @@
 using FluentAssertions;
-using VideoAbridge.Core;
 
 namespace VideoAbridge.Core.Tests;
 
@@ -10,14 +9,12 @@ public class PreviewTimeMapTests
     {
         var plan = new ExportPlan(
             [
-                new KeptClip(TimeSpan.FromSeconds(0), TimeSpan.FromSeconds(10)),
-                new KeptClip(TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(30))
+                new TimeRange(TimeSpan.FromSeconds(0), TimeSpan.FromSeconds(10)),
+                new TimeRange(TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(30))
             ],
             [new ExportJoin(TransitionMode.HardCut, 0)],
-            FadeFromBlackAtStart: false,
-            FadeFromBlackSeconds: 0,
-            FadeToBlackAtEnd: false,
-            FadeToBlackSeconds: 0);
+            FadeFromBlackSeconds: null,
+            FadeToBlackSeconds: null);
 
         var map = PreviewTimeMap.FromPlan(plan);
         map.AbridgedDuration.TotalSeconds.Should().BeApproximately(20, 1e-6);
@@ -35,14 +32,12 @@ public class PreviewTimeMapTests
     {
         var plan = new ExportPlan(
             [
-                new KeptClip(TimeSpan.FromSeconds(0), TimeSpan.FromSeconds(10)),
-                new KeptClip(TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(30))
+                new TimeRange(TimeSpan.FromSeconds(0), TimeSpan.FromSeconds(10)),
+                new TimeRange(TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(30))
             ],
             [new ExportJoin(TransitionMode.Crossfade, 2)],
-            FadeFromBlackAtStart: false,
-            FadeFromBlackSeconds: 0,
-            FadeToBlackAtEnd: false,
-            FadeToBlackSeconds: 0);
+            FadeFromBlackSeconds: null,
+            FadeToBlackSeconds: null);
 
         var map = PreviewTimeMap.FromPlan(plan);
         map.AbridgedDuration.TotalSeconds.Should().BeApproximately(18, 1e-6);

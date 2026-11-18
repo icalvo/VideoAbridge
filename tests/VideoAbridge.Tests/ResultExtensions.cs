@@ -1,0 +1,16 @@
+using VideoAbridge.Core.Outcome;
+
+namespace VideoAbridge.Tests;
+
+internal static class ResultExtensions
+{
+    public static T RequireOk<T>(this Result<T> result) =>
+        result.Match(
+            value => value,
+            error => throw new InvalidOperationException($"{error.Code}: {error.Message}"));
+
+    public static DomainError RequireError<T>(this Result<T> result) =>
+        result.Match(
+            _ => throw new InvalidOperationException("Expected an error result."),
+            error => error);
+}

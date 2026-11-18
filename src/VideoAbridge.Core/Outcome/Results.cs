@@ -1,8 +1,8 @@
-namespace VideoAbridge.Core;
+namespace VideoAbridge.Core.Outcome;
 
 /// <summary>
 /// Factory helpers for <see cref="Result{T}"/>. Prefer
-/// <c>using static VideoAbridge.Core.Results;</c> at call sites.
+/// <c>using static VideoAbridge.Core.Outcome.Results;</c> at call sites.
 /// </summary>
 public static class Results
 {

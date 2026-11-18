@@ -1,7 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text;
-using VideoAbridge.Core;
 
 namespace VideoAbridge.FFmpeg;
 
@@ -151,25 +150,23 @@ public sealed class VideoExporter(string? ffmpegPath = null)
             aCurrent = outA;
         }
 
-        var fadeIn = plan.FadeFromBlackAtStart && plan.FadeFromBlackSeconds > 0;
-        var fadeOut = plan.FadeToBlackAtEnd && plan.FadeToBlackSeconds > 0;
-        if (fadeIn || fadeOut)
+        var fadeIn = plan.FadeFromBlackSeconds is > 0 ? plan.FadeFromBlackSeconds.Value : 0;
+        var fadeOut = plan.FadeToBlackSeconds is > 0 ? plan.FadeToBlackSeconds.Value : 0;
+        if (fadeIn > 0 || fadeOut > 0)
         {
             var vFilters = new List<string>();
             var aFilters = new List<string>();
-            if (fadeIn)
+            if (fadeIn > 0)
             {
-                var fade = plan.FadeFromBlackSeconds;
-                vFilters.Add($"fade=t=in:st=0:d={FormatDouble(fade)}");
-                aFilters.Add($"afade=t=in:st=0:d={FormatDouble(fade)}");
+                vFilters.Add($"fade=t=in:st=0:d={FormatDouble(fadeIn)}");
+                aFilters.Add($"afade=t=in:st=0:d={FormatDouble(fadeIn)}");
             }
 
-            if (fadeOut)
+            if (fadeOut > 0)
             {
-                var fade = plan.FadeToBlackSeconds;
-                var fadeStart = Math.Max(0, accumulated - fade);
-                vFilters.Add($"fade=t=out:st={FormatDouble(fadeStart)}:d={FormatDouble(fade)}");
-                aFilters.Add($"afade=t=out:st={FormatDouble(fadeStart)}:d={FormatDouble(fade)}");
+                var fadeStart = Math.Max(0, accumulated - fadeOut);
+                vFilters.Add($"fade=t=out:st={FormatDouble(fadeStart)}:d={FormatDouble(fadeOut)}");
+                aFilters.Add($"afade=t=out:st={FormatDouble(fadeStart)}:d={FormatDouble(fadeOut)}");
             }
 
             sb.Append(CultureInfo.InvariantCulture, $"[{vCurrent}]{string.Join(",", vFilters)}[vout];");

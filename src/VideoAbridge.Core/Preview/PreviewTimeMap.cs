@@ -1,4 +1,6 @@
-namespace VideoAbridge.Core;
+using System.Collections.Immutable;
+
+namespace VideoAbridge.Core.Preview;
 
 /// <summary>
 /// Maps between abridged (export) timeline time and source timeline time,
@@ -6,9 +8,9 @@ namespace VideoAbridge.Core;
 /// </summary>
 public sealed class PreviewTimeMap
 {
-    private readonly IReadOnlyList<Segment> _segments;
+    private readonly ImmutableList<Segment> _segments;
 
-    private PreviewTimeMap(IReadOnlyList<Segment> segments, TimeSpan abridgedDuration)
+    private PreviewTimeMap(ImmutableList<Segment> segments, TimeSpan abridgedDuration)
     {
         _segments = segments;
         AbridgedDuration = abridgedDuration;
@@ -24,11 +26,12 @@ public sealed class PreviewTimeMap
         if (plan.Clips.Count == 0)
             return Empty;
 
-        var segments = new List<Segment>();
+        var segments = ImmutableList.CreateBuilder<Segment>();
         var outPos = 0.0;
         var clips = plan.Clips;
         var joins = plan.JoinsBetweenClips;
 
+        // Indexed walk: each clip couples to join[i] / join[i-1].
         for (var i = 0; i < clips.Count; i++)
         {
             var clip = clips[i];
@@ -69,7 +72,7 @@ public sealed class PreviewTimeMap
             }
         }
 
-        return new PreviewTimeMap(segments, TimeSpan.FromSeconds(outPos));
+        return new PreviewTimeMap(segments.ToImmutable(), TimeSpan.FromSeconds(outPos));
     }
 
     public TimeSpan ToSource(TimeSpan abridgedTime)
@@ -109,39 +112,37 @@ public sealed class PreviewTimeMap
             return TimeSpan.Zero;
 
         var s = sourceTime.TotalSeconds;
-        var bestOut = _segments[0].OutStart;
-        var bestDist = double.MaxValue;
-
-        foreach (var seg in _segments)
-        {
-            var srcMin = Math.Min(seg.SrcStart, seg.SrcEnd);
-            var srcMax = Math.Max(seg.SrcStart, seg.SrcEnd);
-
-            if (s >= srcMin - 1e-9 && s <= srcMax + 1e-9)
+        var hit = _segments
+            .Select(seg =>
             {
+                var srcMin = Math.Min(seg.SrcStart, seg.SrcEnd);
+                var srcMax = Math.Max(seg.SrcStart, seg.SrcEnd);
+                if (s < srcMin - 1e-9 || s > srcMax + 1e-9)
+                    return (Hit: false, Out: 0.0);
+
                 var srcSpan = seg.SrcEnd - seg.SrcStart;
                 if (Math.Abs(srcSpan) <= 1e-12)
-                    return TimeSpan.FromSeconds(seg.OutStart);
+                    return (Hit: true, Out: seg.OutStart);
 
-                var u = (s - seg.SrcStart) / srcSpan;
-                u = Math.Clamp(u, 0, 1);
-                return TimeSpan.FromSeconds(seg.OutStart + u * (seg.OutEnd - seg.OutStart));
-            }
+                var u = Math.Clamp((s - seg.SrcStart) / srcSpan, 0, 1);
+                return (Hit: true, Out: seg.OutStart + u * (seg.OutEnd - seg.OutStart));
+            })
+            .FirstOrDefault(x => x.Hit);
 
-            foreach (var edge in (double[])[seg.SrcStart, seg.SrcEnd])
-            {
-                var dist = Math.Abs(s - edge);
-                if (dist < bestDist)
-                {
-                    bestDist = dist;
-                    bestOut = Math.Abs(edge - seg.SrcStart) <= Math.Abs(edge - seg.SrcEnd)
-                        ? seg.OutStart
-                        : seg.OutEnd;
-                }
-            }
-        }
+        if (hit.Hit)
+            return TimeSpan.FromSeconds(hit.Out);
 
-        return TimeSpan.FromSeconds(bestOut);
+        var nearest = _segments
+            .SelectMany(seg => ((double[])[seg.SrcStart, seg.SrcEnd]).Select(edge => (
+                Dist: Math.Abs(s - edge),
+                Out: Math.Abs(edge - seg.SrcStart) <= Math.Abs(edge - seg.SrcEnd)
+                    ? seg.OutStart
+                    : seg.OutEnd)))
+            .Aggregate(
+                (Dist: double.MaxValue, Out: _segments[0].OutStart),
+                (best, candidate) => candidate.Dist < best.Dist ? candidate : best);
+
+        return TimeSpan.FromSeconds(nearest.Out);
     }
 
     private readonly record struct Segment(

@@ -1,5 +1,4 @@
 using FluentAssertions;
-using VideoAbridge.Core;
 using VideoAbridge.FFmpeg;
 using Xunit;
 
@@ -12,13 +11,11 @@ public class VideoExporterTests
     {
         var plan = new ExportPlan(
             [
-                new KeptClip(TimeSpan.FromSeconds(0), TimeSpan.FromSeconds(10)),
-                new KeptClip(TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(30))
+                new TimeRange(TimeSpan.FromSeconds(0), TimeSpan.FromSeconds(10)),
+                new TimeRange(TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(30))
             ],
             [new ExportJoin(TransitionMode.Crossfade, 1.5)],
-            FadeFromBlackAtStart: true,
             FadeFromBlackSeconds: 1,
-            FadeToBlackAtEnd: true,
             FadeToBlackSeconds: 2);
 
         var filter = VideoExporter.BuildFilterComplex(plan);
@@ -37,14 +34,12 @@ public class VideoExporterTests
     {
         var plan = new ExportPlan(
             [
-                new KeptClip(TimeSpan.Zero, TimeSpan.FromSeconds(5)),
-                new KeptClip(TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(12))
+                new TimeRange(TimeSpan.Zero, TimeSpan.FromSeconds(5)),
+                new TimeRange(TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(12))
             ],
             [new ExportJoin(TransitionMode.HardCut, 0)],
-            FadeFromBlackAtStart: false,
-            FadeFromBlackSeconds: 0,
-            FadeToBlackAtEnd: false,
-            FadeToBlackSeconds: 0);
+            FadeFromBlackSeconds: null,
+            FadeToBlackSeconds: null);
 
         var filter = VideoExporter.BuildFilterComplex(plan);
         filter.Should().Contain("concat=");

@@ -1,21 +1,22 @@
+using System.Collections.Immutable;
 using System.Collections.ObjectModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using static VideoAbridge.Core.Results;
 
-namespace VideoAbridge.Core;
+namespace VideoAbridge.Services;
 
-public sealed class ProjectDocument
+internal sealed class ProjectDocument
 {
     public string VideoPath { get; init; } = "";
     public double DurationSeconds { get; init; }
     public Collection<MarkerDto> Markers { get; init; } = [];
     public Collection<bool> SegmentDeleted { get; init; } = [];
     public Collection<JoinDto> Joins { get; init; } = [];
-    public bool FadeFromBlackAtStart { get; init; }
-    public double FadeFromBlackSeconds { get; init; }
-    public bool FadeToBlackAtEnd { get; init; }
-    public double FadeToBlackSeconds { get; init; }
+    /// <summary>Null disables fade-from-black.</summary>
+    public double? FadeFromBlackSeconds { get; init; }
+
+    /// <summary>Null disables fade-to-black.</summary>
+    public double? FadeToBlackSeconds { get; init; }
 
     public static ProjectDocument FromTimeline(string videoPath, Timeline timeline)
     {
@@ -44,9 +45,7 @@ public sealed class ProjectDocument
                     CrossfadeSeconds = j.CrossfadeSeconds
                 })
             ],
-            FadeFromBlackAtStart = timeline.Settings.FadeFromBlackAtStart,
             FadeFromBlackSeconds = timeline.Settings.FadeFromBlackSeconds,
-            FadeToBlackAtEnd = timeline.Settings.FadeToBlackAtEnd,
             FadeToBlackSeconds = timeline.Settings.FadeToBlackSeconds
         };
     }
@@ -59,39 +58,39 @@ public sealed class ProjectDocument
         if (SegmentDeleted.Count != Markers.Count + 1)
             return Fail<(string, Timeline)>("InvalidProject", "Segment count must equal marker count + 1.");
 
-        var markers = new List<Marker>();
-        foreach (var marker in Markers.OrderBy(m => m.TimeSeconds))
-        {
-            if (marker.TimeSeconds <= 0 || marker.TimeSeconds >= DurationSeconds)
-                return Fail<(string, Timeline)>("InvalidProject", "Marker time out of range.");
+        if (Markers.Any(m => m.TimeSeconds <= 0 || m.TimeSeconds >= DurationSeconds))
+            return Fail<(string, Timeline)>("InvalidProject", "Marker time out of range.");
 
-            if (!Enum.TryParse<MarkerSource>(marker.Source, out var source))
-                source = MarkerSource.User;
+        ImmutableList<Marker> markers =
+        [
+            .. Markers
+                .OrderBy(m => m.TimeSeconds)
+                .Select(marker =>
+                {
+                    if (!Enum.TryParse<MarkerSource>(marker.Source, out var source))
+                        source = MarkerSource.User;
+                    return new Marker(marker.Id, TimeSpan.FromSeconds(marker.TimeSeconds), source);
+                })
+        ];
 
-            markers.Add(new Marker(marker.Id, TimeSpan.FromSeconds(marker.TimeSeconds), source));
-        }
+        ImmutableList<JoinTransition> joins =
+        [
+            .. Joins.Select(dto =>
+            {
+                if (!Enum.TryParse<TransitionMode>(dto.Mode, out var mode))
+                    mode = TransitionMode.HardCut;
+                return new JoinTransition(
+                    dto.DeletedRunId == Guid.Empty ? Guid.NewGuid() : dto.DeletedRunId,
+                    mode,
+                    mode == TransitionMode.Crossfade ? dto.CrossfadeSeconds : 0);
+            })
+        ];
 
-        var joins = new List<JoinTransition>();
-        foreach (var dto in Joins)
-        {
-            if (!Enum.TryParse<TransitionMode>(dto.Mode, out var mode))
-                mode = TransitionMode.HardCut;
-
-            joins.Add(new JoinTransition(
-                dto.DeletedRunId == Guid.Empty ? Guid.NewGuid() : dto.DeletedRunId,
-                mode,
-                mode == TransitionMode.Crossfade ? dto.CrossfadeSeconds : 0));
-        }
-
-        var settings = new ProjectSettings(
-            FadeFromBlackAtStart,
-            FadeFromBlackAtStart ? FadeFromBlackSeconds : 0,
-            FadeToBlackAtEnd,
-            FadeToBlackAtEnd ? FadeToBlackSeconds : 0);
+        var settings = new ProjectSettings(FadeFromBlackSeconds, FadeToBlackSeconds);
         var timeline = Timeline.FromPersistedState(
             TimeSpan.FromSeconds(DurationSeconds),
             markers,
-            SegmentDeleted,
+            [.. SegmentDeleted],
             joins,
             settings);
 
@@ -134,18 +133,4 @@ public sealed class ProjectDocument
             return Fail<ProjectDocument>("InvalidProject", ex.Message);
         }
     }
-}
-
-public sealed class MarkerDto
-{
-    public Guid Id { get; init; }
-    public double TimeSeconds { get; init; }
-    public string Source { get; init; } = nameof(MarkerSource.User);
-}
-
-public sealed class JoinDto
-{
-    public Guid DeletedRunId { get; init; }
-    public string Mode { get; init; } = nameof(TransitionMode.HardCut);
-    public double CrossfadeSeconds { get; init; }
 }

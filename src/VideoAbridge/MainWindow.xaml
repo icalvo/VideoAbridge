@@ -60,6 +60,38 @@
         <Style x:Key="ToolbarButtonRed" TargetType="Button" BasedOn="{StaticResource ToolbarButtonBase}">
             <Setter Property="Background" Value="#9E5C5C"/>
         </Style>
+        <Style x:Key="VersionTabCloseButton" TargetType="Button">
+            <Setter Property="Width" Value="18"/>
+            <Setter Property="Height" Value="18"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="2"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#C44E52"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#9E3A3E"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
     <DockPanel>
         <Menu DockPanel.Dock="Top"
@@ -84,7 +116,62 @@
                 <Separator/>
                 <MenuItem Header="Detect Scenes" Command="{Binding DetectScenesCommand}"/>
             </MenuItem>
+            <MenuItem Header="_View" IsEnabled="{Binding HasVideoLoaded}">
+                <MenuItem Header="Zoom to _Content" Click="ZoomToContent_Click"/>
+                <MenuItem Header="Zoom to _Fit" Click="ZoomToFit_Click"/>
+            </MenuItem>
+            <MenuItem Header="_Version" IsEnabled="{Binding HasVideoLoaded}">
+                <MenuItem Header="_New Version…" Command="{Binding CreateVersionCommand}"/>
+                <MenuItem Header="_Duplicate Version…" Command="{Binding DuplicateVersionCommand}"/>
+                <MenuItem Header="_Rename Version…" Command="{Binding RenameVersionCommand}"/>
+            </MenuItem>
         </Menu>
+
+        <Border DockPanel.Dock="Top"
+                Background="#252526"
+                BorderBrush="#3F3F46"
+                BorderThickness="0,0,0,1"
+                Visibility="{Binding ShowVersionTabs, Converter={StaticResource BoolToVis}}">
+            <ItemsControl ItemsSource="{Binding VersionTabs}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal"/>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:VersionTabViewModel}">
+                        <Border Margin="4,4,0,4"
+                                Padding="10,4"
+                                CornerRadius="3"
+                                Cursor="Hand"
+                                Background="#3E3E42"
+                                MouseLeftButtonUp="VersionTab_MouseLeftButtonUp">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                            <Setter Property="Background" Value="#5C7A9E"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding Name}"
+                                           Foreground="White"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,8,0"/>
+                                <Button Content="×"
+                                        Style="{StaticResource VersionTabCloseButton}"
+                                        ToolTip="Delete version"
+                                        Command="{Binding DataContext.DeleteVersionCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding Id}"
+                                        Click="VersionTabClose_Click"/>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </Border>
 
         <StatusBar DockPanel.Dock="Bottom" Background="#007ACC">
             <StatusBarItem>

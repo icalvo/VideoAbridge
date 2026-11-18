@@ -1,5 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using System.Windows;
+
+[assembly: InternalsVisibleTo("VideoAbridge.Tests")]
 
 [assembly: ThemeInfo(
     ResourceDictionaryLocation.None,            //where theme specific resource dictionaries are located
@@ -35,6 +38,18 @@ using System.Windows;
     Justification = "Exposed by TimelineControl dependency property / public events required by WPF XAML.",
     Scope = "type",
     Target = "~T:VideoAbridge.ViewModels.MarkerThumbViewModel")]
+[assembly: SuppressMessage(
+    "Usage",
+    "CA1515:Consider making public types internal",
+    Justification = "Bound from MainWindow version tab DataTemplate.",
+    Scope = "type",
+    Target = "~T:VideoAbridge.ViewModels.VersionTabViewModel")]
+[assembly: SuppressMessage(
+    "Usage",
+    "CA1515:Consider making public types internal",
+    Justification = "WPF requires windows referenced from XAML to be public.",
+    Scope = "type",
+    Target = "~T:VideoAbridge.NamePromptDialog")]
 [assembly: SuppressMessage(
     "Usage",
     "CA1515:Consider making public types internal",

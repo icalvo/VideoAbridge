@@ -1,14 +1,6 @@
 using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
 
 namespace VideoAbridge.FFmpeg;
-
-public enum ThumbnailSide
-{
-    Before,
-    After
-}
 
 public sealed class ThumbnailExtractor
 {
@@ -26,6 +18,8 @@ public sealed class ThumbnailExtractor
                 "ThumbCache");
         Directory.CreateDirectory(_cacheDirectory);
     }
+
+    public string CacheDirectory => _cacheDirectory;
 
     public async Task<string?> ExtractAsync(
         string videoPath,
@@ -49,7 +43,7 @@ public sealed class ThumbnailExtractor
                 seek = TimeSpan.Zero;
         }
 
-        var output = GetCachePath(videoPath, seek, side);
+        var output = GetCachePath(videoPath, seek, side, duration);
         if (File.Exists(output))
             return output;
 
@@ -73,13 +67,13 @@ public sealed class ThumbnailExtractor
     }
 
     /// <summary>
-    /// Stable on-disk path keyed by full video path + seek time + side
+    /// Stable on-disk path keyed by file-content fingerprint + seek time + side
     /// (under %LocalAppData%\VideoAbridge\ThumbCache).
     /// </summary>
-    public string GetCachePath(string videoPath, TimeSpan seek, ThumbnailSide side)
+    public string GetCachePath(string videoPath, TimeSpan seek, ThumbnailSide side, TimeSpan duration)
     {
         var fullPath = Path.GetFullPath(videoPath);
-        var videoKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullPath))).ToUpperInvariant();
+        var videoKey = FileContentId.Compute(fullPath, duration);
         var fileName = $"{(long)Math.Round(seek.TotalMilliseconds)}_{side}.jpg";
         return Path.Combine(_cacheDirectory, videoKey, fileName);
     }

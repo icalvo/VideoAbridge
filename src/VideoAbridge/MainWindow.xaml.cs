@@ -82,6 +82,18 @@ public partial class MainWindow : Window, IDisposable
         };
     }
 
+    private void VersionTab_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: VersionTabViewModel tab })
+            _viewModel.SelectVersionCommand.Execute(tab.Id);
+    }
+
+    private void VersionTabClose_Click(object sender, RoutedEventArgs e) => e.Handled = true;
+
+    private void ZoomToContent_Click(object sender, RoutedEventArgs e) => Timeline.ZoomToContent();
+
+    private void ZoomToFit_Click(object sender, RoutedEventArgs e) => Timeline.ZoomToFit();
+
     private static void FocusFadeTextBox(TextBox box)
     {
         box.Focus();

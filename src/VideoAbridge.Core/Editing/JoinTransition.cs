@@ -1,10 +1,4 @@
-namespace VideoAbridge.Core;
-
-public enum TransitionMode
-{
-    HardCut,
-    Crossfade
-}
+namespace VideoAbridge.Core.Editing;
 
 public sealed record JoinTransition(
     Guid DeletedRunId,

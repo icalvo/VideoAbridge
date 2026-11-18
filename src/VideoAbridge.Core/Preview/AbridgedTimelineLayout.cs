@@ -1,22 +1,6 @@
-namespace VideoAbridge.Core;
+using System.Collections.Immutable;
 
-public enum AbridgedOverlayKind
-{
-    FadeIn,
-    FadeOut,
-    Crossfade,
-    Cut
-}
-
-/// <summary>
-/// Overlay on the abridged (export) timeline ruler. Cuts use Start == End;
-/// fades/crossfades use a half-open [Start, End) in abridged time.
-/// </summary>
-public sealed record AbridgedOverlay(
-    AbridgedOverlayKind Kind,
-    TimeSpan Start,
-    TimeSpan End,
-    Guid? DeletedRunId);
+namespace VideoAbridge.Core.Preview;
 
 /// <summary>
 /// Abridged-timeline geometry for Preview mode: duration matches
@@ -24,14 +8,14 @@ public sealed record AbridgedOverlay(
 /// </summary>
 public sealed class AbridgedTimelineLayout
 {
-    private AbridgedTimelineLayout(TimeSpan duration, IReadOnlyList<AbridgedOverlay> overlays)
+    private AbridgedTimelineLayout(TimeSpan duration, ImmutableList<AbridgedOverlay> overlays)
     {
         Duration = duration;
         Overlays = overlays;
     }
 
     public TimeSpan Duration { get; }
-    public IReadOnlyList<AbridgedOverlay> Overlays { get; }
+    public ImmutableList<AbridgedOverlay> Overlays { get; }
 
     public static AbridgedTimelineLayout Empty { get; } = new(TimeSpan.Zero, []);
 
@@ -41,17 +25,18 @@ public sealed class AbridgedTimelineLayout
     /// </summary>
     public static AbridgedTimelineLayout FromPlan(
         ExportPlan plan,
-        IReadOnlyList<Guid>? joinDeletedRunIds = null)
+        ImmutableList<Guid>? joinDeletedRunIds = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         if (plan.Clips.Count == 0)
             return Empty;
 
-        var overlays = new List<AbridgedOverlay>();
+        var overlays = ImmutableList.CreateBuilder<AbridgedOverlay>();
         var outPos = 0.0;
         var clips = plan.Clips;
         var joins = plan.JoinsBetweenClips;
 
+        // Indexed walk: each clip couples to join[i] / join[i-1].
         for (var i = 0; i < clips.Count; i++)
         {
             var clip = clips[i];
@@ -78,62 +63,64 @@ public sealed class AbridgedTimelineLayout
 
             var runId = joinDeletedRunIds is not null && i < joinDeletedRunIds.Count
                 ? joinDeletedRunIds[i]
-                : (Guid?)null;
+                : Guid.Empty;
 
             var join = joins[i];
             if (join.Mode == TransitionMode.Crossfade && join.CrossfadeSeconds > 0)
             {
                 var xf = join.CrossfadeSeconds;
-                overlays.Add(new AbridgedOverlay(
-                    AbridgedOverlayKind.Crossfade,
-                    TimeSpan.FromSeconds(outPos),
-                    TimeSpan.FromSeconds(outPos + xf),
+                overlays.Add(new InteriorOverlay(
+                    TransitionMode.Crossfade,
+                    new TimeRange(TimeSpan.FromSeconds(outPos), TimeSpan.FromSeconds(outPos + xf)),
                     runId));
                 outPos += xf;
             }
             else
             {
                 var at = TimeSpan.FromSeconds(outPos);
-                overlays.Add(new AbridgedOverlay(AbridgedOverlayKind.Cut, at, at, runId));
+                overlays.Add(new InteriorOverlay(
+                    TransitionMode.HardCut,
+                    new TimeRange(at, at),
+                    runId));
             }
         }
 
         var duration = TimeSpan.FromSeconds(outPos);
+        var list = overlays.ToImmutable();
 
-        if (plan.FadeFromBlackAtStart && plan.FadeFromBlackSeconds > 0 && duration > TimeSpan.Zero)
+        if (plan.FadeFromBlackSeconds is > 0 && duration > TimeSpan.Zero)
         {
-            var fade = Math.Min(plan.FadeFromBlackSeconds, duration.TotalSeconds);
-            overlays.Insert(0, new AbridgedOverlay(
-                AbridgedOverlayKind.FadeIn,
-                TimeSpan.Zero,
-                TimeSpan.FromSeconds(fade),
-                DeletedRunId: null));
+            var fade = Math.Min(plan.FadeFromBlackSeconds.Value, duration.TotalSeconds);
+            list = list.Insert(0, new ExteriorOverlay(
+                ExteriorOverlayKind.FadeIn,
+                new TimeRange(TimeSpan.Zero, TimeSpan.FromSeconds(fade))));
         }
 
-        if (plan.FadeToBlackAtEnd && plan.FadeToBlackSeconds > 0 && duration > TimeSpan.Zero)
+        if (plan.FadeToBlackSeconds is > 0 && duration > TimeSpan.Zero)
         {
-            var fade = Math.Min(plan.FadeToBlackSeconds, duration.TotalSeconds);
-            overlays.Add(new AbridgedOverlay(
-                AbridgedOverlayKind.FadeOut,
-                TimeSpan.FromSeconds(Math.Max(0, duration.TotalSeconds - fade)),
-                duration,
-                DeletedRunId: null));
+            var fade = Math.Min(plan.FadeToBlackSeconds.Value, duration.TotalSeconds);
+            list = list.Add(new ExteriorOverlay(
+                ExteriorOverlayKind.FadeOut,
+                new TimeRange(
+                    TimeSpan.FromSeconds(Math.Max(0, duration.TotalSeconds - fade)),
+                    duration)));
         }
 
-        return new AbridgedTimelineLayout(duration, overlays);
+        return new AbridgedTimelineLayout(duration, list);
     }
 
     public static AbridgedTimelineLayout FromTimeline(Timeline timeline)
     {
         ArgumentNullException.ThrowIfNull(timeline);
-        if (timeline.TryBuildExportPlan() is not Ok<ExportPlan> plan)
-            return Empty;
-
-        List<Guid> runIds =
-        [
-            .. timeline.GetDeletedRuns().Where(r => r.IsInterior).Select(r => r.Id)
-        ];
-
-        return FromPlan(plan.Value, runIds);
+        return timeline.TryBuildExportPlan().Match(
+            plan =>
+            {
+                ImmutableList<Guid> runIds =
+                [
+                    .. timeline.GetDeletedRuns().Where(r => r.IsInterior).Select(r => r.Id)
+                ];
+                return FromPlan(plan, runIds);
+            },
+            _ => Empty);
     }
 }
