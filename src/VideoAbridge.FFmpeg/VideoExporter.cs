@@ -15,6 +15,7 @@ public sealed class VideoExporter(string? ffmpegPath = null)
         ExportPlan plan,
         IProgress<double>? progress = null,
         ExportEncodeOptions? encodeOptions = null,
+        Action<string>? onLogLine = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(plan);
@@ -28,19 +29,21 @@ public sealed class VideoExporter(string? ffmpegPath = null)
             args,
             line =>
             {
-                // Best-effort progress from time= in stderr
+                onLogLine?.Invoke(line);
+
+                // Best-effort progress from time= in stderr (also works with \r-delimited stats).
                 var idx = line.IndexOf("time=", StringComparison.Ordinal);
                 if (idx < 0)
                     return;
                 var span = line.AsSpan(idx + 5);
-                var end = span.IndexOf(' ');
+                var end = span.IndexOfAny([' ', '\t']);
                 var token = end < 0 ? span : span[..end];
-                if (TimeSpan.TryParse(token, CultureInfo.InvariantCulture, out var current))
-                {
-                    var total = EstimateOutputDuration(plan).TotalSeconds;
-                    if (total > 0)
-                        progress?.Report(Math.Clamp(current.TotalSeconds / total, 0, 1));
-                }
+                if (!TryParseTimestamp(token, out var currentSeconds))
+                    return;
+
+                var total = EstimateOutputDuration(plan).TotalSeconds;
+                if (total > 0)
+                    progress?.Report(Math.Clamp(currentSeconds / total, 0, 1));
             },
             cancellationToken).ConfigureAwait(false);
 
@@ -198,4 +201,22 @@ public sealed class VideoExporter(string? ffmpegPath = null)
 
     private static string FormatDouble(double value) =>
         value.ToString("0.000", CultureInfo.InvariantCulture);
+
+    private static bool TryParseTimestamp(ReadOnlySpan<char> token, out double seconds)
+    {
+        seconds = 0;
+        if (token.IsEmpty || token.Equals("N/A", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out seconds))
+            return true;
+
+        if (TimeSpan.TryParse(token, CultureInfo.InvariantCulture, out var time))
+        {
+            seconds = time.TotalSeconds;
+            return true;
+        }
+
+        return false;
+    }
 }

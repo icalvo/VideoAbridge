@@ -7,6 +7,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using VideoAbridge.FFmpeg;
 using VideoAbridge.ViewModels;
 
 namespace VideoAbridge.Controls;
@@ -55,7 +56,21 @@ public partial class TimelineControl : UserControl
         DependencyProperty.Register(nameof(AbridgedLayout), typeof(AbridgedTimelineLayout), typeof(TimelineControl),
             new PropertyMetadata(null, OnAbridgedLayoutChanged));
 
+    public static readonly DependencyProperty AudioPeakEnvelopeProperty =
+        DependencyProperty.Register(nameof(AudioPeakEnvelope), typeof(AudioPeakEnvelope), typeof(TimelineControl),
+            new PropertyMetadata(null, OnVisualPropertyChanged));
+
+    public static readonly DependencyProperty PreviewExportPlanProperty =
+        DependencyProperty.Register(nameof(PreviewExportPlan), typeof(ExportPlan), typeof(TimelineControl),
+            new PropertyMetadata(null, OnVisualPropertyChanged));
+
+    public static readonly DependencyProperty PreviewTimeMapProperty =
+        DependencyProperty.Register(nameof(PreviewTimeMap), typeof(PreviewTimeMap), typeof(TimelineControl),
+            new PropertyMetadata(null, OnVisualPropertyChanged));
+
     public const double MinOverlayPixels = 6;
+
+    private static readonly Brush WaveformBrush = CreateFrozenBrush(0x99, 0x00, 0x00, 0x00);
 
     private Line? _playheadLine;
     private TimeSpan _fittedDuration = TimeSpan.Zero;
@@ -74,11 +89,29 @@ public partial class TimelineControl : UserControl
             Redraw();
         };
         SizeChanged += OnControlSizeChanged;
+        Scroller.ScrollChanged += (_, _) => TimelineViewChanged?.Invoke(this, EventArgs.Empty);
         Loaded += (_, _) =>
         {
             UpdateZoomBounds(forceFit: Timeline is not null);
             _lastViewportWidth = GetViewportWidth();
         };
+    }
+
+    /// <summary>Left edge of the viewport as timeline seconds.</summary>
+    public double GetVisibleStartSeconds()
+    {
+        var pps = Math.Max(MinPixelsPerSecond, PixelsPerSecond);
+        if (pps <= 1e-9)
+            return 0;
+        return Math.Max(0, Scroller.HorizontalOffset / pps);
+    }
+
+    /// <summary>Scroll so <paramref name="startSeconds"/> is at the left edge of the viewport.</summary>
+    public void SetVisibleStartSeconds(double startSeconds)
+    {
+        var pps = Math.Max(MinPixelsPerSecond, PixelsPerSecond);
+        UpdateLayout();
+        Scroller.ScrollToHorizontalOffset(Math.Max(0, startSeconds * pps));
     }
 
     public Timeline? Timeline
@@ -141,9 +174,28 @@ public partial class TimelineControl : UserControl
         set => SetValue(AbridgedLayoutProperty, value);
     }
 
+    public AudioPeakEnvelope? AudioPeakEnvelope
+    {
+        get => (AudioPeakEnvelope?)GetValue(AudioPeakEnvelopeProperty);
+        set => SetValue(AudioPeakEnvelopeProperty, value);
+    }
+
+    public ExportPlan? PreviewExportPlan
+    {
+        get => (ExportPlan?)GetValue(PreviewExportPlanProperty);
+        set => SetValue(PreviewExportPlanProperty, value);
+    }
+
+    public PreviewTimeMap? PreviewTimeMap
+    {
+        get => (PreviewTimeMap?)GetValue(PreviewTimeMapProperty);
+        set => SetValue(PreviewTimeMapProperty, value);
+    }
+
     public event EventHandler<TimeSpanEventArgs>? SeekRequested;
     public event EventHandler<GuidEventArgs>? MarkerClicked;
     public event EventHandler<GuidEventArgs>? DeletedRunSelected;
+    public event EventHandler? TimelineViewChanged;
     public event EventHandler? FadeInClicked;
     public event EventHandler? FadeOutClicked;
 
@@ -163,7 +215,8 @@ public partial class TimelineControl : UserControl
     private static void OnPreviewModeChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         var control = (TimelineControl)d;
-        control.UpdateZoomBounds(forceFit: true);
+        // Keep the caller's zoom when switching Edit/Preview; only refresh min/max for the new duration.
+        control.UpdateZoomBounds(forceFit: false);
         control.Redraw();
     }
 
@@ -508,22 +561,28 @@ public partial class TimelineControl : UserControl
                 e.Handled = true;
             };
             RootCanvas.Children.Add(rect);
+        }
 
-            if (overlay.Value is InteriorOverlay joinOverlay)
+        DrawPreviewWaveform(layout, pps, trackTop, trackHeight);
+
+        foreach (var overlay in layout.Overlays)
+        {
+            if (overlay.Value is not InteriorOverlay joinOverlay)
+                continue;
+
+            var (left, right) = OverlayPixelBounds(overlay, pps, trackWidth);
+            var label = new TextBlock
             {
-                var label = new TextBlock
-                {
-                    Text = joinOverlay.Mode == TransitionMode.Crossfade
-                        ? $"XF {joinOverlay.Range.Duration.TotalSeconds:0.##}s"
-                        : "Cut",
-                    Foreground = Brushes.White,
-                    FontSize = 10,
-                    IsHitTestVisible = false
-                };
-                Canvas.SetLeft(label, (left + right) / 2 - 12);
-                Canvas.SetTop(label, trackTop + trackHeight + 4);
-                RootCanvas.Children.Add(label);
-            }
+                Text = joinOverlay.Mode == TransitionMode.Crossfade
+                    ? $"XF {joinOverlay.Range.Duration.TotalSeconds:0.##}s"
+                    : "Cut",
+                Foreground = Brushes.White,
+                FontSize = 10,
+                IsHitTestVisible = false
+            };
+            Canvas.SetLeft(label, (left + right) / 2 - 12);
+            Canvas.SetTop(label, trackTop + trackHeight + 4);
+            RootCanvas.Children.Add(label);
         }
 
         // Topmost hit order: later overlays win; reverse list so cuts/xf drawn later are tested first.
@@ -580,6 +639,8 @@ public partial class TimelineControl : UserControl
             Canvas.SetTop(rect, trackTop);
             RootCanvas.Children.Add(rect);
         }
+
+        DrawEditWaveform(timeline.Duration, pps, trackTop, trackHeight);
 
         foreach (var run in timeline.GetDeletedRuns())
         {
@@ -734,6 +795,114 @@ public partial class TimelineControl : UserControl
         return (left, left + width);
     }
 
+    private void DrawEditWaveform(TimeSpan duration, double pps, double trackTop, double trackHeight)
+    {
+        var peaks = AudioPeakEnvelope;
+        if (peaks is null || peaks.IsEmpty || duration <= TimeSpan.Zero)
+            return;
+
+        var trackWidth = duration.TotalSeconds * pps;
+        var columnCount = WaveformColumnCount(trackWidth);
+        var columns = new (float Min, float Max, double Gain)[columnCount];
+        for (var i = 0; i < columnCount; i++)
+        {
+            var t = TimeSpan.FromSeconds((i + 0.5) * duration.TotalSeconds / columnCount);
+            peaks.Sample(t, out var min, out var max);
+            columns[i] = (min, max, 1.0);
+        }
+
+        DrawWaveformPath(trackTop, trackHeight, trackWidth, columns);
+    }
+
+    private void DrawPreviewWaveform(
+        AbridgedTimelineLayout layout,
+        double pps,
+        double trackTop,
+        double trackHeight)
+    {
+        var peaks = AudioPeakEnvelope;
+        var plan = PreviewExportPlan;
+        var map = PreviewTimeMap;
+        if (peaks is null || peaks.IsEmpty || plan is null || map is null || layout.Duration <= TimeSpan.Zero)
+            return;
+
+        var trackWidth = layout.Duration.TotalSeconds * pps;
+        var columnCount = WaveformColumnCount(trackWidth);
+        var columns = new (float Min, float Max, double Gain)[columnCount];
+        for (var i = 0; i < columnCount; i++)
+        {
+            var abridged = TimeSpan.FromSeconds((i + 0.5) * layout.Duration.TotalSeconds / columnCount);
+            var sample = PreviewAudioGain.Evaluate(plan, map, abridged);
+            peaks.Sample(sample.PrimarySourceTime, out var pMin, out var pMax);
+            var min = pMin * (float)sample.PrimaryWeight;
+            var max = pMax * (float)sample.PrimaryWeight;
+            if (sample.SecondaryWeight > 1e-6)
+            {
+                peaks.Sample(sample.SecondarySourceTime, out var sMin, out var sMax);
+                min += sMin * (float)sample.SecondaryWeight;
+                max += sMax * (float)sample.SecondaryWeight;
+            }
+
+            columns[i] = (min, max, sample.AudibleGain);
+        }
+
+        DrawWaveformPath(trackTop, trackHeight, trackWidth, columns);
+    }
+
+    private int WaveformColumnCount(double trackWidth)
+    {
+        var viewport = GetViewportWidth();
+        return (int)Math.Clamp(
+            Math.Ceiling(Math.Max(viewport, trackWidth) * 2),
+            32,
+            4096);
+    }
+
+    private void DrawWaveformPath(
+        double trackTop,
+        double trackHeight,
+        double trackWidth,
+        (float Min, float Max, double Gain)[] columns)
+    {
+        if (trackWidth < 2 || trackHeight < 2 || columns.Length == 0)
+            return;
+
+        var midY = trackTop + trackHeight / 2;
+        var amp = trackHeight * 0.45;
+        var step = trackWidth / columns.Length;
+
+        var geometry = new StreamGeometry { FillRule = FillRule.Nonzero };
+        using (var ctx = geometry.Open())
+        {
+            ctx.BeginFigure(new Point(0, midY), isFilled: true, isClosed: true);
+            for (var i = 0; i < columns.Length; i++)
+            {
+                var (min, max, gain) = columns[i];
+                var g = Math.Clamp(gain, 0, 1);
+                var y = midY - Math.Clamp(max, -1, 1) * amp * g;
+                ctx.LineTo(new Point((i + 0.5) * step, y), isStroked: true, isSmoothJoin: false);
+            }
+
+            for (var i = columns.Length - 1; i >= 0; i--)
+            {
+                var (min, max, gain) = columns[i];
+                var g = Math.Clamp(gain, 0, 1);
+                var y = midY - Math.Clamp(min, -1, 1) * amp * g;
+                ctx.LineTo(new Point((i + 0.5) * step, y), isStroked: true, isSmoothJoin: false);
+            }
+        }
+
+        geometry.Freeze();
+        var path = new System.Windows.Shapes.Path
+        {
+            Data = geometry,
+            Fill = WaveformBrush,
+            Stroke = null,
+            IsHitTestVisible = false
+        };
+        RootCanvas.Children.Add(path);
+    }
+
     private static string DeletedRunLabel(DeletedRun run, TimeSpan duration)
     {
         if (run.IsInterior)
@@ -819,9 +988,12 @@ public partial class TimelineControl : UserControl
     private static readonly Brush SceneMarkerBrush = CreateFrozenBrush(0x6C, 0xA0, 0xDC);
     private static readonly Brush SceneMarkerSelectedBrush = CreateFrozenBrush(0xF0, 0xA0, 0x4B);
 
-    private static SolidColorBrush CreateFrozenBrush(byte r, byte g, byte b)
+    private static SolidColorBrush CreateFrozenBrush(byte r, byte g, byte b) =>
+        CreateFrozenBrush(0xFF, r, g, b);
+
+    private static SolidColorBrush CreateFrozenBrush(byte a, byte r, byte g, byte b)
     {
-        var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
+        var brush = new SolidColorBrush(Color.FromArgb(a, r, g, b));
         brush.Freeze();
         return brush;
     }
@@ -905,6 +1077,7 @@ public partial class TimelineControl : UserControl
         var newX = timeAtMouse * newPps;
         var targetOffset = newX - mouseInViewport.X;
         Scroller.ScrollToHorizontalOffset(Math.Max(0, targetOffset));
+        TimelineViewChanged?.Invoke(this, EventArgs.Empty);
         e.Handled = true;
     }
 }

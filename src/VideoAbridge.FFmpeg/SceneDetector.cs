@@ -26,6 +26,7 @@ public sealed class SceneDetector(string? ffmpegPath = null)
         IProgress<double>? progress = null,
         IProgress<TimeSpan>? sceneFound = null,
         IProgress<TimeSpan>? positionReached = null,
+        Action<string>? onLogLine = null,
         CancellationToken cancellationToken = default)
     {
         var thresholdText = threshold.ToString("0.###", CultureInfo.InvariantCulture);
@@ -63,6 +64,8 @@ public sealed class SceneDetector(string? ffmpegPath = null)
             args,
             line =>
             {
+                onLogLine?.Invoke(line);
+
                 foreach (Match match in ScdTimeRegex.Matches(line))
                 {
                     if (!TryParseTimestamp(match.Groups["t"].Value, out var filterSeconds))

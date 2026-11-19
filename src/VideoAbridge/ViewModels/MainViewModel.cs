@@ -9,6 +9,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
@@ -25,14 +26,22 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly SceneDetector _sceneDetector = new();
     private readonly ThumbnailExtractor _thumbnails = new();
     private readonly VideoExporter _exporter = new();
+    private readonly AudioPeakExtractor _audioPeaks = new();
     private readonly MarkerCacheService _markerCache = CreateMarkerCache();
     private readonly EditHistory _editHistory = new();
     private CancellationTokenSource? _exportCts;
     private CancellationTokenSource? _sceneDetectCts;
+    private CancellationTokenSource? _audioPeaksCts;
     private bool _disposed;
     private int _thumbnailRefreshSuspendCount;
     private AbridgedVersionSet? _versionSet;
     private DateTime _lastCachePersistUtc;
+    private WindowPlacementDto? _windowPlacement;
+    private TimelineViewStateDto _editView = new();
+    private TimelineViewStateDto? _previewView;
+    private double _visibleStartSeconds;
+    private bool _restoringUiFromCache;
+    private bool _suppressViewCapture;
     private CancellationTokenSource? _thumbnailCts;
     private FrameVideoPlayer? _secondaryPlayer;
     private ExportPlan? _previewPlan;
@@ -72,8 +81,14 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public AbridgedTimelineLayout? AbridgedLayout => _abridgedLayout;
 
+    public ExportPlan? PreviewExportPlan => _previewPlan;
+
+    public PreviewTimeMap? PreviewTimeMap => _previewMap;
+
     /// <summary>Timeline needle: abridged clock in Preview, source clock in Edit.</summary>
     public TimeSpan DisplayPlayhead => IsPreviewMode ? AbridgedPlayhead : Playhead;
+
+    [ObservableProperty] private AudioPeakEnvelope? _audioPeakEnvelope;
 
     [ObservableProperty] private double _minPixelsPerSecond = 4;
     [ObservableProperty] private double _maxPixelsPerSecond = 400;
@@ -90,11 +105,23 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty] private bool _isTasksPaneOpen;
 
-    public bool ShowTasksPaneExpandButton => !IsTasksPaneOpen && HasTasksWorthShowing();
+    public bool ShowTasksPaneCollapsed => !IsTasksPaneOpen;
+
+    public int RunningTaskCount => Tasks.Count(t => t.CanCancel);
+
+    public bool HasRunningTasks => RunningTaskCount > 0;
+
+    public string TasksPaneCollapsedLabel => $"Tasks ({RunningTaskCount})";
 
     public bool ShowVersionTabs => VersionTabs.Count > 1;
 
     public bool HasVideoLoaded => VideoPath is not null && _versionSet is not null;
+
+    /// <summary>Latest window placement restored from cache (MainWindow applies it).</summary>
+    public WindowPlacementDto? PendingWindowPlacement { get; private set; }
+
+    /// <summary>Timeline scroll restore request (seconds); MainWindow applies it on the control.</summary>
+    public double? PendingVisibleStartSeconds { get; private set; }
 
     public MainViewModel()
     {
@@ -123,13 +150,14 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         RefreshStatusBar();
     }
 
-    partial void OnPlayheadChanged(TimeSpan value)
+    partial void OnAbridgedPlayheadChanged(TimeSpan value)
     {
         OnPropertyChanged(nameof(DisplayPlayhead));
-        NotifyTimelineActionCommands();
+        if (_restoringUiFromCache || _suppressViewCapture || !IsPreviewMode)
+            return;
+        CaptureActiveViewState();
+        PersistMarkerCache(force: false);
     }
-
-    partial void OnAbridgedPlayheadChanged(TimeSpan value) => OnPropertyChanged(nameof(DisplayPlayhead));
 
     partial void OnIsDetectingScenesChanged(bool value)
     {
@@ -142,17 +170,46 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         AddMarkerAtPlayheadCommand.NotifyCanExecuteChanged();
         DeleteMarkerCommand.NotifyCanExecuteChanged();
         DeleteSectionCommand.NotifyCanExecuteChanged();
-        UndeleteSectionCommand.NotifyCanExecuteChanged();
-        DeleteSectionFromBeginningCommand.NotifyCanExecuteChanged();
+        RestoreSectionCommand.NotifyCanExecuteChanged();
+        DeleteSectionFromStartCommand.NotifyCanExecuteChanged();
         DeleteSectionToEndCommand.NotifyCanExecuteChanged();
+        RestoreSectionFromStartCommand.NotifyCanExecuteChanged();
+        RestoreSectionToEndCommand.NotifyCanExecuteChanged();
         DetectScenesCommand.NotifyCanExecuteChanged();
+        ExportCommand.NotifyCanExecuteChanged();
+        TogglePreviewModeCommand.NotifyCanExecuteChanged();
+        GoToBeginningCommand.NotifyCanExecuteChanged();
         NotifyUndoRedoCommands();
+        NotifyCommandTooltips();
     }
 
     private void NotifyUndoRedoCommands()
     {
         UndoCommand.NotifyCanExecuteChanged();
         RedoCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(UndoToolTip));
+        OnPropertyChanged(nameof(RedoToolTip));
+    }
+
+    private void NotifyCommandTooltips()
+    {
+        OnPropertyChanged(nameof(AddMarkerToolTip));
+        OnPropertyChanged(nameof(DeleteMarkerToolTip));
+        OnPropertyChanged(nameof(DetectScenesToolTip));
+        OnPropertyChanged(nameof(DeleteSectionToolTip));
+        OnPropertyChanged(nameof(RestoreSectionToolTip));
+        OnPropertyChanged(nameof(DeleteSectionFromStartToolTip));
+        OnPropertyChanged(nameof(DeleteSectionToEndToolTip));
+        OnPropertyChanged(nameof(RestoreSectionFromStartToolTip));
+        OnPropertyChanged(nameof(RestoreSectionToEndToolTip));
+        OnPropertyChanged(nameof(TogglePreviewModeToolTip));
+        OnPropertyChanged(nameof(ExportToolTip));
+        OnPropertyChanged(nameof(UndoToolTip));
+        OnPropertyChanged(nameof(RedoToolTip));
+        OnPropertyChanged(nameof(CreateVersionToolTip));
+        OnPropertyChanged(nameof(DuplicateVersionToolTip));
+        OnPropertyChanged(nameof(RenameVersionToolTip));
+        OnPropertyChanged(nameof(DeleteVersionToolTip));
     }
 
     partial void OnTimelineChanged(Timeline? value)
@@ -192,17 +249,47 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(PreviewModeToggleLabel));
         OnPropertyChanged(nameof(ShowEditChrome));
         OnPropertyChanged(nameof(DisplayPlayhead));
+        TogglePreviewModeCommand.NotifyCanExecuteChanged();
+
+        if (_restoringUiFromCache)
+        {
+            if (value)
+                EnterRealtimePreview(restoreSavedView: true);
+            else
+                ExitRealtimePreview();
+            RefreshStatusBar();
+            return;
+        }
+
+        // Capture the mode we are leaving while pps/scroll still belong to it.
         if (value)
-            EnterRealtimePreview();
+            _editView = CaptureViewState(previewMode: false);
+        else
+            _previewView = CaptureViewState(previewMode: true);
+
+        _suppressViewCapture = true;
+
+        if (value)
+            EnterRealtimePreview(restoreSavedView: _previewView is not null);
         else
             ExitRealtimePreview();
+
+        // Defer restore until TimelineControl has switched duration / zoom bounds.
+        var stateToApply = value ? _previewView : CloneView(_editView);
+        var previewMode = value;
+        Application.Current?.Dispatcher.BeginInvoke(() =>
+        {
+            ApplyViewState(stateToApply, previewMode);
+            PersistMarkerCache(force: false);
+        }, DispatcherPriority.Loaded);
+
         RefreshStatusBar();
     }
 
     partial void OnSelectedDeletedRunIdChanged(Guid? value)
     {
         OnPropertyChanged(nameof(HasSelectedJoin));
-        UndeleteSectionCommand.NotifyCanExecuteChanged();
+        RestoreSectionCommand.NotifyCanExecuteChanged();
         RefreshSelectionFromTimeline();
         RefreshStatusBar();
     }
@@ -216,8 +303,20 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         SetTimelineFromHistory(previous);
     }
 
-    private bool CanUndo() =>
-        Timeline is not null && _editHistory.CanUndo && !IsDetectingScenes;
+    private bool CanUndo() => GetUndoBlockReason() is null;
+
+    public string? UndoToolTip => GetUndoBlockReason();
+
+    private string? GetUndoBlockReason()
+    {
+        if (Timeline is null)
+            return "Open a video to begin.";
+        if (IsDetectingScenes)
+            return "Wait for scene detection to finish.";
+        if (!_editHistory.CanUndo)
+            return "Nothing to undo.";
+        return null;
+    }
 
     [RelayCommand(CanExecute = nameof(CanRedo))]
     private void Redo()
@@ -228,8 +327,20 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         SetTimelineFromHistory(next);
     }
 
-    private bool CanRedo() =>
-        Timeline is not null && _editHistory.CanRedo && !IsDetectingScenes;
+    private bool CanRedo() => GetRedoBlockReason() is null;
+
+    public string? RedoToolTip => GetRedoBlockReason();
+
+    private string? GetRedoBlockReason()
+    {
+        if (Timeline is null)
+            return "Open a video to begin.";
+        if (IsDetectingScenes)
+            return "Wait for scene detection to finish.";
+        if (!_editHistory.CanRedo)
+            return "Nothing to redo.";
+        return null;
+    }
 
     [RelayCommand]
     private void ExpandTasksPane() => IsTasksPaneOpen = true;
@@ -237,8 +348,59 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void CollapseTasksPane() => IsTasksPaneOpen = false;
 
-    partial void OnIsTasksPaneOpenChanged(bool value) =>
-        OnPropertyChanged(nameof(ShowTasksPaneExpandButton));
+    [RelayCommand]
+    private void ToggleTasksPane() => IsTasksPaneOpen = !IsTasksPaneOpen;
+
+    partial void OnIsTasksPaneOpenChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowTasksPaneCollapsed));
+        if (!_restoringUiFromCache)
+            PersistMarkerCache(force: false);
+    }
+
+    partial void OnPixelsPerSecondChanged(double value)
+    {
+        if (_restoringUiFromCache || _suppressViewCapture)
+            return;
+        CaptureActiveViewState();
+        PersistMarkerCache(force: false);
+    }
+
+    partial void OnPlayheadChanged(TimeSpan value)
+    {
+        OnPropertyChanged(nameof(DisplayPlayhead));
+        NotifyTimelineActionCommands();
+        if (_restoringUiFromCache || _suppressViewCapture || IsPreviewMode)
+            return;
+        CaptureActiveViewState();
+        PersistMarkerCache(force: false);
+    }
+
+    /// <summary>Called by MainWindow when the timeline scrollbar moves.</summary>
+    public void ReportTimelineVisibleStart(double visibleStartSeconds)
+    {
+        _visibleStartSeconds = Math.Max(0, visibleStartSeconds);
+        if (_restoringUiFromCache || _suppressViewCapture)
+            return;
+        CaptureActiveViewState();
+        PersistMarkerCache(force: false);
+    }
+
+    /// <summary>Called by the main window when its bounds or state change.</summary>
+    public void ReportWindowPlacement(WindowPlacementDto placement, bool forcePersist = false)
+    {
+        ArgumentNullException.ThrowIfNull(placement);
+        _windowPlacement = new WindowPlacementDto
+        {
+            Left = placement.Left,
+            Top = placement.Top,
+            Width = placement.Width,
+            Height = placement.Height,
+            State = placement.State
+        };
+        if (!_restoringUiFromCache)
+            PersistMarkerCache(force: forcePersist);
+    }
 
     [RelayCommand]
     private async Task OpenVideoAsync()
@@ -350,12 +512,40 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         ApplyVersionResult(_versionSet.Remove(versionId));
     }
 
-    private bool CanManageVersions() => HasVideoLoaded && !IsDetectingScenes;
+    private bool CanManageVersions() => GetManageVersionsBlockReason() is null;
+
+    public string? CreateVersionToolTip => GetManageVersionsBlockReason();
+
+    public string? DuplicateVersionToolTip => GetManageVersionsBlockReason();
+
+    public string? RenameVersionToolTip => GetManageVersionsBlockReason();
+
+    private string? GetManageVersionsBlockReason()
+    {
+        if (!HasVideoLoaded)
+            return "Open a video to begin.";
+        if (IsDetectingScenes)
+            return "Wait for scene detection to finish.";
+        return null;
+    }
 
     private bool CanSelectVersion() => HasVideoLoaded && !IsDetectingScenes;
 
-    private bool CanDeleteVersion() =>
-        HasVideoLoaded && !IsDetectingScenes && _versionSet is { Versions.Count: > 1 };
+    private bool CanDeleteVersion() => GetDeleteVersionBlockReason() is null;
+
+    public string DeleteVersionToolTip =>
+        GetDeleteVersionBlockReason() ?? "Delete version";
+
+    private string? GetDeleteVersionBlockReason()
+    {
+        if (!HasVideoLoaded)
+            return "Open a video to begin.";
+        if (IsDetectingScenes)
+            return "Wait for scene detection to finish.";
+        if (_versionSet is not { Versions.Count: > 1 })
+            return "At least one version is required.";
+        return null;
+    }
 
     private static bool TryPromptVersionName(string title, string prompt, string suggested, out string name)
     {
@@ -387,6 +577,20 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
 
         return candidate;
     }
+
+    [RelayCommand(CanExecute = nameof(CanGoToBeginning))]
+    private void GoToBeginning()
+    {
+        if (Timeline is null)
+            return;
+
+        if (IsPreviewMode)
+            SeekAbridgedPlayhead(TimeSpan.Zero);
+        else
+            SeekPlayhead(TimeSpan.Zero);
+    }
+
+    private bool CanGoToBeginning() => HasVideoLoaded;
 
     [RelayCommand]
     private void PlayPause()
@@ -425,8 +629,20 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         IsPlaying = true;
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanTogglePreviewMode))]
     private void TogglePreviewMode() => IsPreviewMode = !IsPreviewMode;
+
+    private bool CanTogglePreviewMode()
+    {
+        if (IsPreviewMode)
+            return true;
+        return HasKeptMaterial();
+    }
+
+    public string? TogglePreviewModeToolTip =>
+        CanTogglePreviewMode()
+            ? null
+            : "There is no kept material to preview.";
 
     [RelayCommand(CanExecute = nameof(CanAddMarkerAtPlayhead))]
     private void AddMarkerAtPlayhead()
@@ -437,13 +653,22 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         Apply(Timeline.AddMarker(Playhead, MarkerSource.User));
     }
 
-    private bool CanAddMarkerAtPlayhead() =>
-        Timeline is not null
-        && Playhead > TimeSpan.Zero
-        && Playhead < Timeline.Duration
-        && !Timeline.Markers.Any(m => AbsDiff(m.Time, Playhead) <= Timeline.MarkerEpsilon);
+    private bool CanAddMarkerAtPlayhead() => GetAddMarkerBlockReason() is null;
 
-    public void ToggleMarkerSelection(Guid markerId)
+    public string? AddMarkerToolTip => GetAddMarkerBlockReason();
+
+    private string? GetAddMarkerBlockReason()
+    {
+        if (Timeline is null)
+            return "Open a video to begin.";
+        if (Playhead <= TimeSpan.Zero || Playhead >= Timeline.Duration)
+            return "Move the playhead inside the video to add a marker.";
+        if (Timeline.Markers.Any(m => AbsDiff(m.Time, Playhead) <= Timeline.MarkerEpsilon))
+            return "A marker already exists near the playhead.";
+        return null;
+    }
+
+    public void ToggleMarkerSelection(Guid markerId, bool extendSelection = false)
     {
         SelectedDeletedRunId = null;
 
@@ -480,7 +705,14 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            // Outside: drop the nearest selected marker, keep the far one, add clicked.
+            if (!extendSelection)
+            {
+                SelectedMarkerIds.Clear();
+                SelectedMarkerIds.Add(markerId);
+                return;
+            }
+
+            // Shift+click outside: drop the nearest selected marker, keep the far one, add clicked.
             var nearestId = AbsDiff(clicked.Time, left.Time) <= AbsDiff(clicked.Time, right.Time)
                 ? left.Id
                 : right.Id;
@@ -503,13 +735,17 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         SelectedMarkerIds.Remove(id);
     }
 
-    private bool CanDeleteMarker()
-    {
-        if (Timeline is null || SelectedMarkerIds.Count != 1)
-            return false;
+    private bool CanDeleteMarker() => GetDeleteMarkerBlockReason() is null;
 
-        var marker = Timeline.Markers.FirstOrDefault(m => m.Id == SelectedMarkerIds[0]);
-        return marker is not null && marker.Source != MarkerSource.SceneDetect;
+    public string? DeleteMarkerToolTip => GetDeleteMarkerBlockReason();
+
+    private string? GetDeleteMarkerBlockReason()
+    {
+        if (Timeline is null)
+            return "Open a video to begin.";
+        if (SelectedMarkerIds.Count != 1)
+            return "Select a single marker to delete.";
+        return Timeline.GetRemoveMarkerBlockReason(SelectedMarkerIds[0]);
     }
 
     [RelayCommand(CanExecute = nameof(CanDeleteSection))]
@@ -521,10 +757,23 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         Apply(Timeline.DeleteBetween(left, right));
     }
 
-    private bool CanDeleteSection() => Timeline is not null && SelectedMarkerIds.Count == 2;
+    private bool CanDeleteSection() => GetDeleteSectionBlockReason() is null;
 
-    [RelayCommand(CanExecute = nameof(CanUndeleteSection))]
-    private void UndeleteSection()
+    public string? DeleteSectionToolTip => GetDeleteSectionBlockReason();
+
+    private string? GetDeleteSectionBlockReason()
+    {
+        if (Timeline is null)
+            return "Open a video to begin.";
+        if (!TryGetOrderedSelectedMarkerIds(out var left, out var right))
+            return "Select two markers to delete the section between them.";
+        if (!Timeline.RangeContainsSegment(left, right, isDeleted: false))
+            return "The selected range is already deleted.";
+        return null;
+    }
+
+    [RelayCommand(CanExecute = nameof(CanRestoreSection))]
+    private void RestoreSection()
     {
         if (Timeline is null)
             return;
@@ -542,12 +791,30 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         Apply(Timeline.RestoreBetween(left, right));
     }
 
-    private bool CanUndeleteSection() =>
-        Timeline is not null
-        && (SelectedDeletedRunId is not null || SelectedMarkerIds.Count == 2);
+    private bool CanRestoreSection() => GetRestoreSectionBlockReason() is null;
 
-    [RelayCommand(CanExecute = nameof(CanDeleteSectionFromBeginning))]
-    private void DeleteSectionFromBeginning()
+    public string? RestoreSectionToolTip => GetRestoreSectionBlockReason();
+
+    private string? GetRestoreSectionBlockReason()
+    {
+        if (Timeline is null)
+            return "Open a video to begin.";
+        if (SelectedDeletedRunId is Guid runId)
+        {
+            return Timeline.GetDeletedRuns().Any(r => r.Id == runId)
+                ? null
+                : "Select a deleted section, or two markers that bound one.";
+        }
+
+        if (!TryGetOrderedSelectedMarkerIds(out var left, out var right))
+            return "Select a deleted section, or two markers that bound one.";
+        if (!Timeline.RangeContainsSegment(left, right, isDeleted: true))
+            return "The selected range has nothing deleted to restore.";
+        return null;
+    }
+
+    [RelayCommand(CanExecute = nameof(CanDeleteSectionFromStart))]
+    private void DeleteSectionFromStart()
     {
         if (Timeline is null || !TryGetLeftmostSelectedMarkerId(out var left))
             return;
@@ -555,8 +822,20 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         Apply(Timeline.DeleteBetween(Timeline.StartBoundId, left));
     }
 
-    private bool CanDeleteSectionFromBeginning() =>
-        Timeline is not null && SelectedMarkerIds.Count is 1 or 2;
+    private bool CanDeleteSectionFromStart() => GetDeleteSectionFromStartBlockReason() is null;
+
+    public string? DeleteSectionFromStartToolTip => GetDeleteSectionFromStartBlockReason();
+
+    private string? GetDeleteSectionFromStartBlockReason()
+    {
+        if (Timeline is null)
+            return "Open a video to begin.";
+        if (!TryGetLeftmostSelectedMarkerId(out var left))
+            return "Select one or two markers.";
+        if (!Timeline.RangeContainsSegment(Timeline.StartBoundId, left, isDeleted: false))
+            return "Everything before the selection is already deleted.";
+        return null;
+    }
 
     [RelayCommand(CanExecute = nameof(CanDeleteSectionToEnd))]
     private void DeleteSectionToEnd()
@@ -567,8 +846,68 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         Apply(Timeline.DeleteBetween(right, Timeline.EndBoundId));
     }
 
-    private bool CanDeleteSectionToEnd() =>
-        Timeline is not null && SelectedMarkerIds.Count is 1 or 2;
+    private bool CanDeleteSectionToEnd() => GetDeleteSectionToEndBlockReason() is null;
+
+    public string? DeleteSectionToEndToolTip => GetDeleteSectionToEndBlockReason();
+
+    private string? GetDeleteSectionToEndBlockReason()
+    {
+        if (Timeline is null)
+            return "Open a video to begin.";
+        if (!TryGetRightmostSelectedMarkerId(out var right))
+            return "Select one or two markers.";
+        if (!Timeline.RangeContainsSegment(right, Timeline.EndBoundId, isDeleted: false))
+            return "Everything after the selection is already deleted.";
+        return null;
+    }
+
+    [RelayCommand(CanExecute = nameof(CanRestoreSectionFromStart))]
+    private void RestoreSectionFromStart()
+    {
+        if (Timeline is null || !TryGetLeftmostSelectedMarkerId(out var left))
+            return;
+
+        Apply(Timeline.RestoreBetween(Timeline.StartBoundId, left));
+    }
+
+    private bool CanRestoreSectionFromStart() => GetRestoreSectionFromStartBlockReason() is null;
+
+    public string? RestoreSectionFromStartToolTip => GetRestoreSectionFromStartBlockReason();
+
+    private string? GetRestoreSectionFromStartBlockReason()
+    {
+        if (Timeline is null)
+            return "Open a video to begin.";
+        if (!TryGetLeftmostSelectedMarkerId(out var left))
+            return "Select one or two markers.";
+        if (!Timeline.RangeContainsSegment(Timeline.StartBoundId, left, isDeleted: true))
+            return "Nothing before the selection is deleted.";
+        return null;
+    }
+
+    [RelayCommand(CanExecute = nameof(CanRestoreSectionToEnd))]
+    private void RestoreSectionToEnd()
+    {
+        if (Timeline is null || !TryGetRightmostSelectedMarkerId(out var right))
+            return;
+
+        Apply(Timeline.RestoreBetween(right, Timeline.EndBoundId));
+    }
+
+    private bool CanRestoreSectionToEnd() => GetRestoreSectionToEndBlockReason() is null;
+
+    public string? RestoreSectionToEndToolTip => GetRestoreSectionToEndBlockReason();
+
+    private string? GetRestoreSectionToEndBlockReason()
+    {
+        if (Timeline is null)
+            return "Open a video to begin.";
+        if (!TryGetRightmostSelectedMarkerId(out var right))
+            return "Select one or two markers.";
+        if (!Timeline.RangeContainsSegment(right, Timeline.EndBoundId, isDeleted: true))
+            return "Nothing after the selection is deleted.";
+        return null;
+    }
 
     private bool TryGetOrderedSelectedMarkerIds(out Guid left, out Guid right)
     {
@@ -736,13 +1075,40 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         if (VideoPath is null || Timeline is null || IsDetectingScenes)
             return;
 
-        await RunSceneDetectInBackgroundAsync(VideoPath, Timeline.Duration).ConfigureAwait(true);
+        await RunSceneDetectInBackgroundAsync(VideoPath, Timeline.Duration, openPane: true)
+            .ConfigureAwait(true);
     }
 
-    private bool CanDetectScenes() =>
-        VideoPath is not null && Timeline is not null && !IsDetectingScenes;
+    private bool CanDetectScenes() => GetDetectScenesBlockReason() is null;
 
-    [RelayCommand]
+    public string? DetectScenesToolTip => GetDetectScenesBlockReason();
+
+    private string? GetDetectScenesBlockReason()
+    {
+        if (VideoPath is null || Timeline is null)
+            return "Open a video to begin.";
+        if (IsDetectingScenes)
+            return "Scene detection is already running.";
+        return null;
+    }
+
+    private bool CanExport() => GetExportBlockReason() is null;
+
+    public string? ExportToolTip => GetExportBlockReason();
+
+    private string? GetExportBlockReason()
+    {
+        if (VideoPath is null)
+            return "Open a video to begin.";
+        if (!HasKeptMaterial())
+            return "There is no kept material to export.";
+        return null;
+    }
+
+    private bool HasKeptMaterial() =>
+        Timeline is not null && Timeline.GetKeptRuns().Count > 0;
+
+    [RelayCommand(CanExecute = nameof(CanExport))]
     private async Task ExportAsync()
     {
         if (Timeline is null || VideoPath is null)
@@ -751,7 +1117,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         ExportPlan? plan = null;
         Timeline.TryBuildExportPlan().Match(
             value => plan = value,
-            error => ReportError(error.Message));
+            _ => { });
         if (plan is null)
             return;
 
@@ -773,7 +1139,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         IsExporting = true;
 
         var outputPath = dialog.FileName;
-        var task = CreateTask($"Export: {Path.GetFileName(outputPath)}");
+        var task = CreateTask($"Export: {Path.GetFileName(outputPath)}", openPane: true);
         task.ResultPath = outputPath;
         task.PrimaryActionLabel = "Open";
         task.PrimaryActionCommand = new RelayCommand(() => OpenExportedFile(outputPath));
@@ -784,6 +1150,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
                 await _exportCts.CancelAsync().ConfigureAwait(true);
         });
         task.DismissCommand = new RelayCommand(() => DismissTask(task));
+        NotifyTasksPaneChrome();
 
         try
         {
@@ -793,12 +1160,14 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
                 outputPath,
                 plan,
                 progress,
+                onLogLine: task.AppendLog,
                 cancellationToken: _exportCts.Token).ConfigureAwait(true);
             task.Progress = 1;
             task.IsCompleted = true;
             task.CanCancel = false;
             task.HasResultActions = true;
             task.Title = $"Exported: {Path.GetFileName(outputPath)}";
+            NotifyTasksPaneChrome();
         }
         catch (OperationCanceledException)
         {
@@ -962,7 +1331,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void EnterRealtimePreview()
+    private void EnterRealtimePreview(bool restoreSavedView)
     {
         if (Timeline is null || VideoPath is null)
         {
@@ -1011,7 +1380,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         _secondaryPlayer = null;
         PreviewSecondaryFrame = null;
         EnsureSecondaryPlayer();
-        RefreshRealtimePreviewModel(seekToPlayhead: true);
+        RefreshRealtimePreviewModel(seekToPlayhead: !restoreSavedView);
     }
 
     private void ExitRealtimePreview()
@@ -1021,6 +1390,8 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         _previewMap = null;
         _abridgedLayout = null;
         OnPropertyChanged(nameof(AbridgedLayout));
+        OnPropertyChanged(nameof(PreviewExportPlan));
+        OnPropertyChanged(nameof(PreviewTimeMap));
         _seekGateTarget = null;
         PreviewBlackoutOpacity = 0;
         PreviewSecondaryOpacity = 0;
@@ -1036,7 +1407,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         ExportPlan? plan = null;
         Timeline.TryBuildExportPlan().Match(
             value => plan = value,
-            error => ReportError(error.Message));
+            _ => { });
         if (plan is null)
         {
             IsPreviewMode = false;
@@ -1047,18 +1418,23 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         _previewMap = PreviewTimeMap.FromPlan(_previewPlan);
         _abridgedLayout = AbridgedTimelineLayout.FromTimeline(Timeline);
         OnPropertyChanged(nameof(AbridgedLayout));
+        OnPropertyChanged(nameof(PreviewExportPlan));
+        OnPropertyChanged(nameof(PreviewTimeMap));
         EndCrossfadeVisuals();
 
-        var snapped = Timeline.SnapToNearestKept(Playhead);
-        Playhead = snapped;
-        SyncAbridgedPlayheadFromSource(snapped);
         if (seekToPlayhead)
         {
+            var snapped = Timeline.SnapToNearestKept(Playhead);
+            Playhead = snapped;
+            SyncAbridgedPlayheadFromSource(snapped);
             GateSeek(snapped);
             _player.Seek(snapped);
+            ApplyPreviewVisuals(snapped);
         }
-
-        ApplyPreviewVisuals(snapped);
+        else if (_previewMap is not null)
+        {
+            ApplyPreviewVisuals(Playhead);
+        }
     }
 
     private void ApplyPreviewVisuals(TimeSpan sourceTime)
@@ -1254,6 +1630,10 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         RenameVersionCommand.NotifyCanExecuteChanged();
         DeleteVersionCommand.NotifyCanExecuteChanged();
         SelectVersionCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CreateVersionToolTip));
+        OnPropertyChanged(nameof(DuplicateVersionToolTip));
+        OnPropertyChanged(nameof(RenameVersionToolTip));
+        OnPropertyChanged(nameof(DeleteVersionToolTip));
     }
 
     private void PruneSelectedMarkers()
@@ -1329,7 +1709,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         _lastCachePersistUtc = now;
         try
         {
-            _markerCache.SaveVersionSet(VideoPath, _versionSet);
+            _markerCache.SaveVersionSet(VideoPath, _versionSet, CaptureUiCacheState());
         }
         catch (IOException)
         {
@@ -1345,8 +1725,170 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    private AbridgedVersionSet RestoreVersionSetFromCache(TimeSpan duration, string path) =>
-        _markerCache.TryLoadVersionSet(path, duration) ?? AbridgedVersionSet.CreateDefault(duration);
+    private UiCacheState CaptureUiCacheState()
+    {
+        if (!_suppressViewCapture)
+            CaptureActiveViewState();
+        return new UiCacheState
+        {
+            IsPreviewMode = IsPreviewMode,
+            IsTasksPaneOpen = IsTasksPaneOpen,
+            Window = _windowPlacement,
+            EditView = CloneView(_editView),
+            PreviewView = CloneView(_previewView),
+            PixelsPerSecond = _editView.PixelsPerSecond
+        };
+    }
+
+    private void CaptureActiveViewState()
+    {
+        if (_suppressViewCapture)
+            return;
+
+        if (IsPreviewMode)
+            _previewView = CaptureViewState(previewMode: true);
+        else
+            _editView = CaptureViewState(previewMode: false);
+    }
+
+    private TimelineViewStateDto CaptureViewState(bool previewMode) =>
+        new()
+        {
+            PixelsPerSecond = PixelsPerSecond,
+            VisibleStartSeconds = _visibleStartSeconds,
+            PlayheadSeconds = previewMode
+                ? AbridgedPlayhead.TotalSeconds
+                : Playhead.TotalSeconds
+        };
+
+    private static TimelineViewStateDto? CloneView(TimelineViewStateDto? view) =>
+        view is null
+            ? null
+            : new TimelineViewStateDto
+            {
+                PixelsPerSecond = view.PixelsPerSecond,
+                VisibleStartSeconds = view.VisibleStartSeconds,
+                PlayheadSeconds = view.PlayheadSeconds
+            };
+
+    private void ApplyViewState(TimelineViewStateDto? state, bool previewMode)
+    {
+        _suppressViewCapture = true;
+
+        if (state is null)
+        {
+            // First visit to Preview: fit the abridged timeline once, then remember it.
+            if (previewMode)
+            {
+                PendingVisibleStartSeconds = 0;
+                OnPropertyChanged(nameof(PendingVisibleStartSeconds));
+                PendingForceTimelineFit = true;
+                OnPropertyChanged(nameof(PendingForceTimelineFit));
+            }
+            else
+            {
+                _suppressViewCapture = false;
+            }
+
+            return;
+        }
+
+        if (state.PixelsPerSecond > 0)
+            PixelsPerSecond = Math.Clamp(state.PixelsPerSecond, MinPixelsPerSecond, MaxPixelsPerSecond);
+
+        _visibleStartSeconds = Math.Max(0, state.VisibleStartSeconds);
+        PendingVisibleStartSeconds = _visibleStartSeconds;
+        OnPropertyChanged(nameof(PendingVisibleStartSeconds));
+
+        var playhead = TimeSpan.FromSeconds(Math.Max(0, state.PlayheadSeconds));
+        if (previewMode)
+        {
+            if (_previewMap is not null)
+                SeekAbridgedPlayhead(playhead);
+            else
+                AbridgedPlayhead = playhead;
+        }
+        else
+        {
+            SeekPlayhead(playhead);
+        }
+
+        // Stay suppressed until MainWindow applies scroll (ClearPendingTimelineViewRequests).
+    }
+
+    public bool PendingForceTimelineFit { get; private set; }
+
+    public void ClearPendingTimelineViewRequests()
+    {
+        PendingVisibleStartSeconds = null;
+        PendingForceTimelineFit = false;
+        _suppressViewCapture = false;
+        CaptureActiveViewState();
+    }
+
+    private (AbridgedVersionSet VersionSet, MarkerCacheEntry? Entry) RestoreFromCache(
+        TimeSpan duration,
+        string path)
+    {
+        var entry = _markerCache.TryLoad(path, duration);
+        if (entry is null)
+            return (AbridgedVersionSet.CreateDefault(duration), null);
+
+        var set = MarkerCacheService.TryToVersionSet(entry, duration);
+        return set is null
+            ? (AbridgedVersionSet.CreateDefault(duration), null)
+            : (set, entry);
+    }
+
+    private void ApplyUiStateFromCache(MarkerCacheEntry? entry)
+    {
+        _restoringUiFromCache = true;
+        try
+        {
+            _editView = entry?.EditView is { } edit
+                ? CloneView(edit)!
+                : new TimelineViewStateDto
+                {
+                    PixelsPerSecond = entry?.PixelsPerSecond is { } legacy && legacy > 0 ? legacy : PixelsPerSecond,
+                    VisibleStartSeconds = 0,
+                    PlayheadSeconds = 0
+                };
+            _previewView = CloneView(entry?.PreviewView);
+
+            if (entry?.IsTasksPaneOpen is { } open)
+                IsTasksPaneOpen = open;
+
+            _windowPlacement = entry?.Window is { } window
+                ? new WindowPlacementDto
+                {
+                    Left = window.Left,
+                    Top = window.Top,
+                    Width = window.Width,
+                    Height = window.Height,
+                    State = window.State
+                }
+                : null;
+            PendingWindowPlacement = _windowPlacement;
+            OnPropertyChanged(nameof(PendingWindowPlacement));
+
+            var wantPreview = entry?.IsPreviewMode == true && HasKeptMaterial();
+            if (wantPreview)
+            {
+                IsPreviewMode = true;
+                ApplyViewState(_previewView, previewMode: true);
+            }
+            else
+            {
+                if (IsPreviewMode)
+                    IsPreviewMode = false;
+                ApplyViewState(_editView, previewMode: false);
+            }
+        }
+        finally
+        {
+            _restoringUiFromCache = false;
+        }
+    }
 
     private async Task EnsureMarkerThumbnailAsync(
         Guid markerId,
@@ -1404,7 +1946,10 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         }).Task.ConfigureAwait(false);
     }
 
-    private async Task RunSceneDetectInBackgroundAsync(string path, TimeSpan duration)
+    private async Task RunSceneDetectInBackgroundAsync(
+        string path,
+        TimeSpan duration,
+        bool openPane = false)
     {
         CancelSceneDetect();
 
@@ -1426,9 +1971,10 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         var taskTitle = startAt > TimeSpan.Zero
             ? $"Scene detection: {Path.GetFileName(path)} (from {FormatTime(startAt)})"
             : $"Scene detection: {Path.GetFileName(path)}";
-        var task = CreateTask(taskTitle);
+        var task = CreateTask(taskTitle, openPane);
         task.CanCancel = true;
         task.CancelCommand = new RelayCommand(CancelSceneDetect);
+        NotifyTasksPaneChrome();
         if (startAt > TimeSpan.Zero && duration > TimeSpan.Zero)
             task.Progress = Math.Clamp(startAt.TotalSeconds / duration.TotalSeconds, 0, 1);
 
@@ -1458,6 +2004,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
                 progress: progress,
                 sceneFound: scenes,
                 positionReached: positions,
+                onLogLine: task.AppendLog,
                 cancellationToken: cts.Token).ConfigureAwait(true);
 
             if (cts.IsCancellationRequested || VideoPath != path)
@@ -1525,6 +2072,8 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     private async Task LoadVideoAsync(string path, bool runSceneDetect)
     {
         CancelSceneDetect();
+        CancelAudioPeaks();
+        AudioPeakEnvelope = null;
         if (IsPreviewMode)
             IsPreviewMode = false;
 
@@ -1539,7 +2088,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             _player.Load(fullPath);
             IsPlaying = false;
 
-            var versionSet = RestoreVersionSetFromCache(info.Duration, fullPath);
+            var (versionSet, cacheEntry) = RestoreFromCache(info.Duration, fullPath);
             // Avoid OnTimelineChanged kicking off a blocking all-marker thumb rebuild mid-load.
             SuspendThumbnailRefresh();
             try
@@ -1554,14 +2103,15 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
                 ResumeThumbnailRefresh();
             }
 
-            Playhead = TimeSpan.Zero;
             ClearMarkerSelection();
             MarkerThumbs.Clear();
             _editHistory.Clear();
+            ApplyUiStateFromCache(cacheEntry);
             NotifyTimelineActionCommands();
             RefreshStatusBar();
             if (versionSet.ActiveTimeline.Markers.Count > 0)
                 _ = RefreshThumbnailsAsync();
+            _ = LoadAudioPeaksAsync(fullPath, duration);
         }
         catch (InvalidOperationException ex)
         {
@@ -1592,7 +2142,72 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             _ = RunSceneDetectInBackgroundAsync(loadedPath, duration);
     }
 
-    private LongTaskItem CreateTask(string title)
+    private void CancelAudioPeaks()
+    {
+        if (_audioPeaksCts is null)
+            return;
+
+        _audioPeaksCts.Cancel();
+        _audioPeaksCts.Dispose();
+        _audioPeaksCts = null;
+    }
+
+    private async Task LoadAudioPeaksAsync(string path, TimeSpan duration)
+    {
+        CancelAudioPeaks();
+        AudioPeakEnvelope = null;
+        var cts = new CancellationTokenSource();
+        _audioPeaksCts = cts;
+        var task = CreateTask($"Waveform: {Path.GetFileName(path)}");
+        task.CanCancel = true;
+        task.CancelCommand = new RelayCommand(CancelAudioPeaks);
+        NotifyTasksPaneChrome();
+        try
+        {
+            var progress = new Progress<double>(p => task.Progress = p);
+            var envelope = await _audioPeaks.ExtractAsync(
+                    path,
+                    duration: duration,
+                    progress: progress,
+                    onLogLine: task.AppendLog,
+                    cancellationToken: cts.Token)
+                .ConfigureAwait(true);
+            if (cts.IsCancellationRequested || !ReferenceEquals(_audioPeaksCts, cts))
+            {
+                RemoveTask(task);
+                return;
+            }
+
+            AudioPeakEnvelope = envelope.IsEmpty ? null : envelope;
+            RemoveTask(task);
+        }
+        catch (OperationCanceledException)
+        {
+            RemoveTask(task);
+        }
+        catch (InvalidOperationException)
+        {
+            RemoveTask(task);
+            if (!cts.IsCancellationRequested && ReferenceEquals(_audioPeaksCts, cts))
+                AudioPeakEnvelope = null;
+        }
+        catch (IOException)
+        {
+            RemoveTask(task);
+            if (!cts.IsCancellationRequested && ReferenceEquals(_audioPeaksCts, cts))
+                AudioPeakEnvelope = null;
+        }
+        finally
+        {
+            if (ReferenceEquals(_audioPeaksCts, cts))
+            {
+                cts.Dispose();
+                _audioPeaksCts = null;
+            }
+        }
+    }
+
+    private LongTaskItem CreateTask(string title, bool openPane = false)
     {
         var task = new LongTaskItem
         {
@@ -1601,8 +2216,9 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             HasResultActions = false
         };
         Tasks.Add(task);
-        IsTasksPaneOpen = true;
-        OnPropertyChanged(nameof(ShowTasksPaneExpandButton));
+        if (openPane)
+            IsTasksPaneOpen = true;
+        NotifyTasksPaneChrome();
         return task;
     }
 
@@ -1611,7 +2227,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         void Remove()
         {
             Tasks.Remove(task);
-            CollapseTasksPaneIfIdle();
+            NotifyTasksPaneChrome();
         }
 
         if (Application.Current?.Dispatcher.CheckAccess() == true)
@@ -1622,17 +2238,11 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void DismissTask(LongTaskItem task) => RemoveTask(task);
 
-    private static bool IsTaskWorthShowing(LongTaskItem task) =>
-        task.CanCancel || task.HasResultActions;
-
-    private bool HasTasksWorthShowing() => Tasks.Any(IsTaskWorthShowing);
-
-    private void CollapseTasksPaneIfIdle()
+    private void NotifyTasksPaneChrome()
     {
-        OnPropertyChanged(nameof(ShowTasksPaneExpandButton));
-        if (HasTasksWorthShowing())
-            return;
-        IsTasksPaneOpen = false;
+        OnPropertyChanged(nameof(RunningTaskCount));
+        OnPropertyChanged(nameof(HasRunningTasks));
+        OnPropertyChanged(nameof(TasksPaneCollapsedLabel));
     }
 
     private static void OpenExportedFile(string path)
@@ -1922,6 +2532,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         if (disposing)
         {
             CancelSceneDetect();
+            CancelAudioPeaks();
             try
             {
                 _sceneDetectCts?.Dispose();

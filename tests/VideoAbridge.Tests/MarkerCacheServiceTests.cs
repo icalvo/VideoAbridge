@@ -21,7 +21,35 @@ public class MarkerCacheServiceTests
         set = set.ReplaceActiveTimeline(set.ActiveTimeline.SetStartFade(1.25).RequireOk());
         set = set.WithSceneDetectPosition(TimeSpan.FromSeconds(15));
         set = set.CreateVersionFromScenes("Alt").RequireOk();
-        cache.SaveVersionSet(video, set);
+        cache.SaveVersionSet(
+            video,
+            set,
+            new UiCacheState
+            {
+                IsPreviewMode = true,
+                IsTasksPaneOpen = true,
+                PixelsPerSecond = 64,
+                EditView = new TimelineViewStateDto
+                {
+                    PixelsPerSecond = 64,
+                    VisibleStartSeconds = 12.5,
+                    PlayheadSeconds = 20
+                },
+                PreviewView = new TimelineViewStateDto
+                {
+                    PixelsPerSecond = 80,
+                    VisibleStartSeconds = 3,
+                    PlayheadSeconds = 5
+                },
+                Window = new WindowPlacementDto
+                {
+                    Left = 40,
+                    Top = 50,
+                    Width = 1280,
+                    Height = 800,
+                    State = "Maximized"
+                }
+            });
 
         var loaded = cache.TryLoadVersionSet(video, duration);
         loaded.Should().NotBeNull();
@@ -31,12 +59,29 @@ public class MarkerCacheServiceTests
         loaded.Versions.First(v => v.Name == AbridgedVersionSet.DefaultVersionName)
             .Timeline.Settings.FadeFromBlackSeconds.Should().Be(1.25);
 
+        var entry = cache.TryLoad(video, duration);
+        entry.Should().NotBeNull();
+        entry.IsPreviewMode.Should().BeTrue();
+        entry.IsTasksPaneOpen.Should().BeTrue();
+        entry.EditView.Should().NotBeNull();
+        entry.EditView.PixelsPerSecond.Should().Be(64);
+        entry.EditView.VisibleStartSeconds.Should().Be(12.5);
+        entry.EditView.PlayheadSeconds.Should().Be(20);
+        entry.PreviewView.Should().NotBeNull();
+        entry.PreviewView.PixelsPerSecond.Should().Be(80);
+        entry.Window.Should().NotBeNull();
+        entry.Window.Left.Should().Be(40);
+        entry.Window.State.Should().Be("Maximized");
+
         var files = Directory.GetFiles(cache.CacheDirectory, "*.json");
         files.Should().ContainSingle();
         var text = File.ReadAllText(files[0]);
         text.Should().Contain("versions");
         text.Should().Contain("activeVersionId");
         text.Should().Contain("\"name\": \"Alt\"");
+        text.Should().Contain("editView");
+        text.Should().Contain("previewView");
+        text.Should().Contain("isTasksPaneOpen");
         text.Should().NotContain("fadeFromBlackAtStart");
         text.Should().NotContain("videoPath");
         using var doc = JsonDocument.Parse(text);

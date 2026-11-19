@@ -92,13 +92,16 @@ internal sealed class MarkerCacheService
         File.Delete(temp);
     }
 
-    public void SaveVersionSet(string videoPath, AbridgedVersionSet versionSet)
+    public void SaveVersionSet(
+        string videoPath,
+        AbridgedVersionSet versionSet,
+        UiCacheState? uiState = null)
     {
         ArgumentNullException.ThrowIfNull(versionSet);
 
         var fullPath = Path.GetFullPath(videoPath);
         var fileHash = FileContentId.Compute(fullPath, versionSet.Duration);
-        Save(ToEntry(fileHash, versionSet));
+        Save(ToEntry(fileHash, versionSet, uiState));
     }
 
     public AbridgedVersionSet? TryLoadVersionSet(string videoPath, TimeSpan duration)
@@ -113,7 +116,10 @@ internal sealed class MarkerCacheService
     public string GetCacheFilePath(string fileHash) =>
         Path.Combine(_cacheDirectory, fileHash + ".json");
 
-    internal static MarkerCacheEntry ToEntry(string fileHash, AbridgedVersionSet versionSet)
+    internal static MarkerCacheEntry ToEntry(
+        string fileHash,
+        AbridgedVersionSet versionSet,
+        UiCacheState? uiState = null)
     {
         return new MarkerCacheEntry
         {
@@ -137,9 +143,37 @@ internal sealed class MarkerCacheService
                         FadeToBlackSeconds = doc.FadeToBlackSeconds
                     };
                 })
-            ]
+            ],
+            PixelsPerSecond = uiState?.EditView?.PixelsPerSecond ?? uiState?.PixelsPerSecond,
+            IsPreviewMode = uiState?.IsPreviewMode,
+            IsTasksPaneOpen = uiState?.IsTasksPaneOpen,
+            Window = CloneWindow(uiState?.Window),
+            EditView = CloneView(uiState?.EditView),
+            PreviewView = CloneView(uiState?.PreviewView)
         };
     }
+
+    private static WindowPlacementDto? CloneWindow(WindowPlacementDto? window) =>
+        window is null
+            ? null
+            : new WindowPlacementDto
+            {
+                Left = window.Left,
+                Top = window.Top,
+                Width = window.Width,
+                Height = window.Height,
+                State = window.State
+            };
+
+    private static TimelineViewStateDto? CloneView(TimelineViewStateDto? view) =>
+        view is null
+            ? null
+            : new TimelineViewStateDto
+            {
+                PixelsPerSecond = view.PixelsPerSecond,
+                VisibleStartSeconds = view.VisibleStartSeconds,
+                PlayheadSeconds = view.PlayheadSeconds
+            };
 
     internal static AbridgedVersionSet? TryToVersionSet(MarkerCacheEntry entry, TimeSpan probedDuration)
     {

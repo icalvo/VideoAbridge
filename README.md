@@ -28,13 +28,36 @@ VideoAbridge is not a general NLE and not a multi-clip editor. You open one fini
 
 ### Timeline navigation
 - Click timeline to seek; Ctrl+Wheel to zoom
-- **Zoom to Content** — fit all undeleted sections in view
-- **Zoom to Fit** — full zoom out over the whole displayed timeline
+- **Zoom to abridged content** — fit all undeleted sections in view
+- **Zoom to fit** — full zoom out over the whole displayed timeline
 
 ### Persistence & export
-- **Automatic cache** of versions, markers, cuts, joins, and fades keyed by file content fingerprint (reopen the same file → restore work)
+- **Automatic cache** of versions, markers, cuts, joins, fades, Edit/Preview mode, per-mode zoom/scroll/playhead, Tasks pane state, and window placement keyed by file content fingerprint (reopen the same file → restore work)
 - **Export** — FFmpeg writes an abridged MP4 (kept clips + joins + fades)
-- **Tasks pane** — progress for long jobs (scene detect, export), with cancel / open-result actions
+- **Tasks pane** — sidebar for long jobs (opens for export/scene detect; waveform runs quietly), with cancel / open-result actions
+
+### Keyboard shortcuts
+Shortcuts are ignored while typing in a text box.
+
+| Shortcut | Action |
+| --- | --- |
+| Ctrl+O | Open Video |
+| Ctrl+E | Export |
+| Space | Play / Pause |
+| Home | Go to Beginning |
+| Ctrl+Z / Ctrl+Y | Undo / Redo |
+| M | Add Marker |
+| Delete | Delete Marker |
+| Ctrl+D | Delete Section |
+| Ctrl+Shift+D | Restore Section |
+| Ctrl+Shift+Home / End | Delete Section from Start / to End |
+| Ctrl+Alt+Home / End | Restore Section from Start / to End |
+| Ctrl+Shift+S | Detect Scenes |
+| Tab | Toggle Edit / Preview |
+| Ctrl+1 / Ctrl+0 | Zoom to abridged content / Zoom to fit |
+| Ctrl+N / Ctrl+Shift+N | New / Duplicate Version |
+| F2 | Rename Version |
+| Ctrl+Shift+T | Expand / collapse Tasks pane |
 
 ## Requirements
 
@@ -68,14 +91,16 @@ If the PNG changes, the pre-push hook asks you to commit it and push again. Skip
 
 ## Releases
 
-Pushes to `main` whose commit message contains `[release]` run [.github/workflows/release.yml](.github/workflows/release.yml): tests, publishes a self-contained `win-x64` build, and creates a GitHub Release (`v<year>.<month>.<run_number>`) with a zip asset. FFmpeg/ffprobe are not bundled—install them separately (see Requirements).
+Notable changes live in [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)). While working, append bullets under **Unreleased**. To publish, rename that section to a version (`## [x.y.z] - YYYY-MM-DD`) and push to `main`.
+
+[.github/workflows/release.yml](.github/workflows/release.yml) reads the latest versioned changelog entry; if that GitHub Release does not exist yet, it runs tests, publishes a self-contained `win-x64` build, and creates the Release (`v` + version) with a zip asset. FFmpeg/ffprobe are not bundled—install them separately (see Requirements).
 
 ## Typical workflow
 
 1. **File → Open Video** — probes duration, restores cached versions/edits if present, resumes scene detection when needed.
-2. Add markers (manually and/or **Detect Scenes**), select boundaries, **Delete Section** (or from beginning / to end).
+2. Add markers (manually and/or **Detect Scenes**), select boundaries, **Delete** / **Restore Section** (or from start / to end).
 3. Click a **Cut** / **XF** under a deleted interior run to set hard cut vs crossfade; set start/end fades in the side panel (`0` = off).
-4. Toggle **Preview** to scrub the abridged result; use **View → Zoom to Content / Zoom to Fit** as needed.
+4. Toggle **Preview** to scrub the abridged result; use **View → Zoom to abridged content / Zoom to fit** as needed.
 5. Optionally create more versions (**Version** menu) for alternate short cuts of the same file.
 6. **File → Export…** writes the active version’s abridged MP4.
 

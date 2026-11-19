@@ -168,8 +168,11 @@ public readonly record struct PreviewVisualState(
             PreviewComplete: false);
     }
 
-    private static double BlackoutOpacityFor(ExportPlan plan, TimeSpan abridged, TimeSpan total)
+    /// <summary>Fade-to/from-black opacity (0 = fully audible, 1 = silent) at abridged time.</summary>
+    public static double BlackoutOpacityFor(ExportPlan plan, TimeSpan abridged, TimeSpan total)
     {
+        ArgumentNullException.ThrowIfNull(plan);
+
         var t = abridged.TotalSeconds;
         var dur = Math.Max(total.TotalSeconds, 1e-6);
         var opacity = 0.0;

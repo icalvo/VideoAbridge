@@ -13,35 +13,88 @@ permissions:
 
 jobs:
   release:
-    if: ${{ contains(github.event.head_commit.message, '[release]') }}
     runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Resolve version from changelog
+        id: version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f CHANGELOG.md ]]; then
+            echo "CHANGELOG.md is missing."
+            exit 1
+          fi
+
+          VERSION=""
+          while IFS= read -r line || [[ -n "$line" ]]; do
+            if [[ "$line" =~ ^##\ \[([^]]+)\]\ -\ ([0-9]{4}-[0-9]{2}-[0-9]{2}) ]]; then
+              name="${BASH_REMATCH[1]}"
+              if [[ "${name,,}" != "unreleased" ]]; then
+                VERSION="$name"
+                break
+              fi
+            fi
+          done < CHANGELOG.md
+
+          if [[ -z "$VERSION" ]]; then
+            echo "No versioned changelog entry found; skipping release."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Accept either "1.2.3" or "v1.2.3" in the changelog heading.
+          VERSION="${VERSION#v}"
+          VERSION="${VERSION#V}"
+          TAG="v$VERSION"
+
+          echo "Latest changelog version: $VERSION (tag $TAG)"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "GitHub Release $TAG already exists; skipping."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          NOTES_FILE="$RUNNER_TEMP/release-notes.md"
+          awk -v ver="$VERSION" '
+            BEGIN { heading = "## [" ver "] - " }
+            index($0, heading) == 1 { grab = 1; next }
+            grab && /^## \[/ { exit }
+            grab { print }
+          ' CHANGELOG.md > "$NOTES_FILE"
+
+          {
+            echo "## Changelog"
+            echo
+            cat "$NOTES_FILE"
+          } > "$RUNNER_TEMP/release-body.md"
+
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "notes_path=$RUNNER_TEMP/release-body.md" >> "$GITHUB_OUTPUT"
+
       - name: Setup .NET
+        if: steps.version.outputs.should_release == 'true'
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "11.0.x"
 
-      - name: Compute version
-        id: version
-        shell: bash
-        run: |
-          YEAR="$(date -u +%Y)"
-          MONTH="$(date -u +%m)"
-          MONTH=$((10#$MONTH))
-          VERSION="$YEAR.$MONTH.${{ github.run_number }}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-
       - name: Test
+        if: steps.version.outputs.should_release == 'true'
         run: |
           dotnet test tests/VideoAbridge.Core.Tests/VideoAbridge.Core.Tests.csproj -c Release --nologo
           dotnet test tests/VideoAbridge.FFmpeg.Tests/VideoAbridge.FFmpeg.Tests.csproj -c Release --nologo
           dotnet test tests/VideoAbridge.Tests/VideoAbridge.Tests.csproj -c Release --nologo
 
       - name: Publish
+        if: steps.version.outputs.should_release == 'true'
         run: >
           dotnet publish src/VideoAbridge/VideoAbridge.csproj
           -c Release
@@ -54,6 +107,7 @@ jobs:
           --nologo
 
       - name: Package
+        if: steps.version.outputs.should_release == 'true'
         shell: pwsh
         run: |
           $zip = Join-Path $env:RUNNER_TEMP "VideoAbridge-${{ steps.version.outputs.tag }}-win-x64.zip"
@@ -61,11 +115,12 @@ jobs:
           echo "ASSET=$zip" >> $env:GITHUB_ENV
 
       - name: Create GitHub Release
+        if: steps.version.outputs.should_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: VideoAbridge ${{ steps.version.outputs.tag }}
-          generate_release_notes: true
+          body_path: ${{ steps.version.outputs.notes_path }}
           files: ${{ env.ASSET }}
           fail_on_unmatched_files: true
         env:

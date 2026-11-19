@@ -21,6 +21,7 @@
             <Setter Property="Foreground" Value="White"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="ToolTipService.ShowOnDisabled" Value="True"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
@@ -93,38 +94,213 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="TasksPaneToggleButton" TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="4,2"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="Transparent"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Opacity" Value="0.85"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Opacity" Value="0.7"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="TaskLogButton" TargetType="Button">
+            <Setter Property="Width" Value="28"/>
+            <Setter Property="Height" Value="14"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Background" Value="#55555A"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="2"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#6A6A70"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#444448"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="TaskActionCloseButton" TargetType="Button">
+            <Setter Property="Width" Value="22"/>
+            <Setter Property="Height" Value="22"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Background" Value="#C44E52"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#D65A5E"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#9E3A3E"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
     <DockPanel>
         <Menu DockPanel.Dock="Top"
               Background="{DynamicResource {x:Static SystemColors.MenuBarBrushKey}}"
               Foreground="{DynamicResource {x:Static SystemColors.MenuTextBrushKey}}">
             <MenuItem Header="_File">
-                <MenuItem Header="Open _Video…" Command="{Binding OpenVideoCommand}"/>
+                <MenuItem Header="Open _Video…"
+                          Command="{Binding OpenVideoCommand}"
+                          InputGestureText="Ctrl+O"/>
                 <Separator/>
-                <MenuItem Header="E_xport…" Command="{Binding ExportCommand}"/>
+                <MenuItem Header="E_xport…"
+                          Command="{Binding ExportCommand}"
+                          InputGestureText="Ctrl+E"
+                          ToolTip="{Binding ExportToolTip}"
+                          ToolTipService.ShowOnDisabled="True"/>
             </MenuItem>
             <MenuItem Header="_Edit" IsEnabled="{Binding ShowEditChrome}">
-                <MenuItem Header="_Undo" Command="{Binding UndoCommand}" InputGestureText="Ctrl+Z"/>
-                <MenuItem Header="_Redo" Command="{Binding RedoCommand}" InputGestureText="Ctrl+Y"/>
+                <MenuItem Header="_Undo"
+                          Command="{Binding UndoCommand}"
+                          InputGestureText="Ctrl+Z"
+                          ToolTip="{Binding UndoToolTip}"
+                          ToolTipService.ShowOnDisabled="True"/>
+                <MenuItem Header="_Redo"
+                          Command="{Binding RedoCommand}"
+                          InputGestureText="Ctrl+Y"
+                          ToolTip="{Binding RedoToolTip}"
+                          ToolTipService.ShowOnDisabled="True"/>
                 <Separator/>
-                <MenuItem Header="Add Marker" Command="{Binding AddMarkerAtPlayheadCommand}"/>
-                <MenuItem Header="Delete Marker" Command="{Binding DeleteMarkerCommand}"/>
+                <MenuItem Header="Add Marker"
+                          Command="{Binding AddMarkerAtPlayheadCommand}"
+                          InputGestureText="M"
+                          ToolTip="{Binding AddMarkerToolTip}"
+                          ToolTipService.ShowOnDisabled="True"/>
+                <MenuItem Header="Delete Marker"
+                          Command="{Binding DeleteMarkerCommand}"
+                          InputGestureText="Delete"
+                          ToolTip="{Binding DeleteMarkerToolTip}"
+                          ToolTipService.ShowOnDisabled="True"/>
                 <Separator/>
-                <MenuItem Header="Delete Section" Command="{Binding DeleteSectionCommand}"/>
-                <MenuItem Header="Undelete Section" Command="{Binding UndeleteSectionCommand}"/>
-                <MenuItem Header="Delete Section from Beginning" Command="{Binding DeleteSectionFromBeginningCommand}"/>
-                <MenuItem Header="Delete Section to End" Command="{Binding DeleteSectionToEndCommand}"/>
+                <MenuItem Header="Delete Section"
+                          Command="{Binding DeleteSectionCommand}"
+                          InputGestureText="Ctrl+D"
+                          ToolTip="{Binding DeleteSectionToolTip}"
+                          ToolTipService.ShowOnDisabled="True"/>
+                <MenuItem Header="Restore Section"
+                          Command="{Binding RestoreSectionCommand}"
+                          InputGestureText="Ctrl+Shift+D"
+                          ToolTip="{Binding RestoreSectionToolTip}"
+                          ToolTipService.ShowOnDisabled="True"/>
+                <MenuItem Header="Delete Section from Start"
+                          Command="{Binding DeleteSectionFromStartCommand}"
+                          InputGestureText="Ctrl+Shift+Home"
+                          ToolTip="{Binding DeleteSectionFromStartToolTip}"
+                          ToolTipService.ShowOnDisabled="True"/>
+                <MenuItem Header="Delete Section to End"
+                          Command="{Binding DeleteSectionToEndCommand}"
+                          InputGestureText="Ctrl+Shift+End"
+                          ToolTip="{Binding DeleteSectionToEndToolTip}"
+                          ToolTipService.ShowOnDisabled="True"/>
+                <MenuItem Header="Restore Section from Start"
+                          Command="{Binding RestoreSectionFromStartCommand}"
+                          InputGestureText="Ctrl+Alt+Home"
+                          ToolTip="{Binding RestoreSectionFromStartToolTip}"
+                          ToolTipService.ShowOnDisabled="True"/>
+                <MenuItem Header="Restore Section to End"
+                          Command="{Binding RestoreSectionToEndCommand}"
+                          InputGestureText="Ctrl+Alt+End"
+                          ToolTip="{Binding RestoreSectionToEndToolTip}"
+                          ToolTipService.ShowOnDisabled="True"/>
                 <Separator/>
-                <MenuItem Header="Detect Scenes" Command="{Binding DetectScenesCommand}"/>
+                <MenuItem Header="Detect Scenes"
+                          Command="{Binding DetectScenesCommand}"
+                          InputGestureText="Ctrl+Shift+S"
+                          ToolTip="{Binding DetectScenesToolTip}"
+                          ToolTipService.ShowOnDisabled="True"/>
             </MenuItem>
             <MenuItem Header="_View" IsEnabled="{Binding HasVideoLoaded}">
-                <MenuItem Header="Zoom to _Content" Click="ZoomToContent_Click"/>
-                <MenuItem Header="Zoom to _Fit" Click="ZoomToFit_Click"/>
+                <MenuItem Header="Toggle Edit / _Preview"
+                          Command="{Binding TogglePreviewModeCommand}"
+                          InputGestureText="Tab"
+                          ToolTip="{Binding TogglePreviewModeToolTip}"
+                          ToolTipService.ShowOnDisabled="True"/>
+                <MenuItem Header="Go to _Beginning"
+                          Command="{Binding GoToBeginningCommand}"
+                          InputGestureText="Home"/>
+                <MenuItem Header="_Tasks pane"
+                          Command="{Binding ToggleTasksPaneCommand}"
+                          InputGestureText="Ctrl+Shift+T"/>
+                <Separator/>
+                <MenuItem Header="Zoom to _abridged content"
+                          Command="{Binding ZoomToAbridgedContentCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                          InputGestureText="Ctrl+1"/>
+                <MenuItem Header="Zoom to _fit"
+                          Command="{Binding ZoomToFitCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                          InputGestureText="Ctrl+0"/>
             </MenuItem>
             <MenuItem Header="_Version" IsEnabled="{Binding HasVideoLoaded}">
-                <MenuItem Header="_New Version…" Command="{Binding CreateVersionCommand}"/>
-                <MenuItem Header="_Duplicate Version…" Command="{Binding DuplicateVersionCommand}"/>
-                <MenuItem Header="_Rename Version…" Command="{Binding RenameVersionCommand}"/>
+                <MenuItem Header="_New Version…"
+                          Command="{Binding CreateVersionCommand}"
+                          InputGestureText="Ctrl+N"
+                          ToolTip="{Binding CreateVersionToolTip}"
+                          ToolTipService.ShowOnDisabled="True"/>
+                <MenuItem Header="_Duplicate Version…"
+                          Command="{Binding DuplicateVersionCommand}"
+                          InputGestureText="Ctrl+Shift+N"
+                          ToolTip="{Binding DuplicateVersionToolTip}"
+                          ToolTipService.ShowOnDisabled="True"/>
+                <MenuItem Header="_Rename Version…"
+                          Command="{Binding RenameVersionCommand}"
+                          InputGestureText="F2"
+                          ToolTip="{Binding RenameVersionToolTip}"
+                          ToolTipService.ShowOnDisabled="True"/>
             </MenuItem>
         </Menu>
 
@@ -163,7 +339,8 @@
                                            Margin="0,0,8,0"/>
                                 <Button Content="×"
                                         Style="{StaticResource VersionTabCloseButton}"
-                                        ToolTip="Delete version"
+                                        ToolTip="{Binding DataContext.DeleteVersionToolTip, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        ToolTipService.ShowOnDisabled="True"
                                         Command="{Binding DataContext.DeleteVersionCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                         CommandParameter="{Binding Id}"
                                         Click="VersionTabClose_Click"/>
@@ -195,7 +372,7 @@
                 <ColumnDefinition Width="280"/>
             </Grid.ColumnDefinitions>
 
-            <!-- Tasks sidebar: only beside preview, not the timeline -->
+            <!-- Tasks sidebar: only beside preview, not the timeline. Expand/collapse is manual only. -->
             <Border Grid.Row="0" Grid.Column="0"
                     Width="280"
                     Background="#333337"
@@ -203,13 +380,14 @@
                     Padding="12"
                     Visibility="{Binding IsTasksPaneOpen, Converter={StaticResource BoolToVis}}">
                 <DockPanel>
-                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12" LastChildFill="True">
                         <Button DockPanel.Dock="Right"
-                                Content="‹"
+                                Content="&lt;&lt;"
+                                Style="{StaticResource TasksPaneToggleButton}"
                                 ToolTip="Collapse"
-                                Padding="8,2"
+                                VerticalAlignment="Center"
                                 Command="{Binding CollapseTasksPaneCommand}"/>
-                        <TextBlock Text="Tasks" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center"/>
+                        <TextBlock Text="Tasks" FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
                     </DockPanel>
                     <ListBox ItemsSource="{Binding Tasks}"
                              Background="Transparent"
@@ -237,19 +415,27 @@
                                     <DockPanel>
                                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top" Margin="8,0,0,0">
                                             <Button Content="✕"
+                                                    Style="{StaticResource TaskActionCloseButton}"
                                                     ToolTip="Cancel"
-                                                    Padding="6,2"
                                                     Command="{Binding CancelCommand}"
                                                     Visibility="{Binding CanCancel, Converter={StaticResource BoolToVis}}"/>
                                             <Button Content="✕"
+                                                    Style="{StaticResource TaskActionCloseButton}"
                                                     ToolTip="Dismiss"
-                                                    Padding="6,2"
                                                     Command="{Binding DismissCommand}"
                                                     Visibility="{Binding HasResultActions, Converter={StaticResource BoolToVis}}"/>
                                         </StackPanel>
                                         <StackPanel>
                                             <TextBlock Text="{Binding Title}" Foreground="White" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                                            <ProgressBar Height="14" Minimum="0" Maximum="1" Value="{Binding Progress}" Margin="0,8,0,0"/>
+                                            <DockPanel Margin="0,8,0,0" LastChildFill="True">
+                                                <Button DockPanel.Dock="Right"
+                                                        Content="..."
+                                                        Style="{StaticResource TaskLogButton}"
+                                                        ToolTip="Show log"
+                                                        Margin="6,0,0,0"
+                                                        Command="{Binding ShowLogCommand}"/>
+                                                <ProgressBar Height="14" Minimum="0" Maximum="1" Value="{Binding Progress}"/>
+                                            </DockPanel>
                                             <StackPanel Orientation="Horizontal" Margin="0,8,0,0"
                                                         Visibility="{Binding HasResultActions, Converter={StaticResource BoolToVis}}">
                                                 <Button Content="{Binding PrimaryActionLabel}"
@@ -266,15 +452,41 @@
                 </DockPanel>
             </Border>
 
-            <!-- Expand strip when pane collapsed but tasks are active -->
-            <Button Grid.Row="0" Grid.Column="0"
-                    Content="Tasks ›"
-                    ToolTip="Show tasks"
-                    Padding="6,8"
+            <!-- Collapsed strip: always visible when pane is closed -->
+            <Border Grid.Row="0" Grid.Column="0"
+                    Width="28"
+                    Background="#333337"
                     Margin="0,0,8,0"
-                    VerticalAlignment="Top"
-                    Command="{Binding ExpandTasksPaneCommand}"
-                    Visibility="{Binding ShowTasksPaneExpandButton, Converter={StaticResource BoolToVis}}"/>
+                    Visibility="{Binding ShowTasksPaneCollapsed, Converter={StaticResource BoolToVis}}">
+                <DockPanel>
+                    <Button DockPanel.Dock="Top"
+                            Content=">>"
+                            Style="{StaticResource TasksPaneToggleButton}"
+                            ToolTip="Expand tasks"
+                            Margin="2"
+                            Command="{Binding ExpandTasksPaneCommand}"/>
+                    <TextBlock Text="{Binding TasksPaneCollapsedLabel}"
+                               FontWeight="Bold"
+                               FontSize="12"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               TextAlignment="Center">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="White"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasRunningTasks}" Value="True">
+                                        <Setter Property="Foreground" Value="Yellow"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                        <TextBlock.LayoutTransform>
+                            <RotateTransform Angle="-90"/>
+                        </TextBlock.LayoutTransform>
+                    </TextBlock>
+                </DockPanel>
+            </Border>
 
             <Border Grid.Row="0" Grid.Column="1" Background="Black" CornerRadius="2" ClipToBounds="True">
                 <!-- Overlay lives inside VideoView Content so it sits above the Win32 video surface. -->
@@ -370,27 +582,51 @@
             </Border>
 
             <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,8">
-                <Button Content="{Binding PreviewModeToggleLabel}" Command="{Binding TogglePreviewModeCommand}"
+                <Button Content="{Binding PreviewModeToggleLabel}"
+                        Command="{Binding TogglePreviewModeCommand}"
+                        ToolTip="{Binding TogglePreviewModeToolTip}"
                         Style="{StaticResource ToolbarButtonBlue}"
                         Margin="0,0,20,0" FontWeight="SemiBold"/>
                 <StackPanel Orientation="Horizontal" Margin="0,0,20,0"
                             Visibility="{Binding ShowEditChrome, Converter={StaticResource BoolToVis}}">
-                    <Button Content="Add Marker" Command="{Binding AddMarkerAtPlayheadCommand}"
+                    <Button Content="Add Marker"
+                            Command="{Binding AddMarkerAtPlayheadCommand}"
+                            ToolTip="{Binding AddMarkerToolTip}"
                             Style="{StaticResource ToolbarButtonGreen}" Margin="0,0,8,0"/>
-                    <Button Content="Delete Marker" Command="{Binding DeleteMarkerCommand}"
+                    <Button Content="Delete Marker"
+                            Command="{Binding DeleteMarkerCommand}"
+                            ToolTip="{Binding DeleteMarkerToolTip}"
                             Style="{StaticResource ToolbarButtonGreen}" Margin="0,0,8,0"/>
-                    <Button Content="Detect Scenes" Command="{Binding DetectScenesCommand}"
+                    <Button Content="Detect Scenes"
+                            Command="{Binding DetectScenesCommand}"
+                            ToolTip="{Binding DetectScenesToolTip}"
                             Style="{StaticResource ToolbarButtonGreen}"/>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal"
                             Visibility="{Binding ShowEditChrome, Converter={StaticResource BoolToVis}}">
-                    <Button Content="Delete Section" Command="{Binding DeleteSectionCommand}"
+                    <Button Content="Delete Section"
+                            Command="{Binding DeleteSectionCommand}"
+                            ToolTip="{Binding DeleteSectionToolTip}"
                             Style="{StaticResource ToolbarButtonRed}" Margin="0,0,8,0"/>
-                    <Button Content="Undelete Section" Command="{Binding UndeleteSectionCommand}"
+                    <Button Content="Restore Section"
+                            Command="{Binding RestoreSectionCommand}"
+                            ToolTip="{Binding RestoreSectionToolTip}"
                             Style="{StaticResource ToolbarButtonRed}" Margin="0,0,8,0"/>
-                    <Button Content="Delete Section from Beginning" Command="{Binding DeleteSectionFromBeginningCommand}"
+                    <Button Content="Delete Section from Start"
+                            Command="{Binding DeleteSectionFromStartCommand}"
+                            ToolTip="{Binding DeleteSectionFromStartToolTip}"
                             Style="{StaticResource ToolbarButtonRed}" Margin="0,0,8,0"/>
-                    <Button Content="Delete Section to End" Command="{Binding DeleteSectionToEndCommand}"
+                    <Button Content="Delete Section to End"
+                            Command="{Binding DeleteSectionToEndCommand}"
+                            ToolTip="{Binding DeleteSectionToEndToolTip}"
+                            Style="{StaticResource ToolbarButtonRed}" Margin="0,0,8,0"/>
+                    <Button Content="Restore Section from Start"
+                            Command="{Binding RestoreSectionFromStartCommand}"
+                            ToolTip="{Binding RestoreSectionFromStartToolTip}"
+                            Style="{StaticResource ToolbarButtonRed}" Margin="0,0,8,0"/>
+                    <Button Content="Restore Section to End"
+                            Command="{Binding RestoreSectionToEndCommand}"
+                            ToolTip="{Binding RestoreSectionToEndToolTip}"
                             Style="{StaticResource ToolbarButtonRed}"/>
                 </StackPanel>
             </StackPanel>
@@ -401,6 +637,9 @@
                                       Playhead="{Binding DisplayPlayhead}"
                                       IsPreviewMode="{Binding IsPreviewMode}"
                                       AbridgedLayout="{Binding AbridgedLayout}"
+                                      AudioPeakEnvelope="{Binding AudioPeakEnvelope}"
+                                      PreviewExportPlan="{Binding PreviewExportPlan}"
+                                      PreviewTimeMap="{Binding PreviewTimeMap}"
                                       PixelsPerSecond="{Binding PixelsPerSecond, Mode=TwoWay}"
                                       MinPixelsPerSecond="{Binding MinPixelsPerSecond, Mode=TwoWay}"
                                       MaxPixelsPerSecond="{Binding MaxPixelsPerSecond, Mode=TwoWay}"

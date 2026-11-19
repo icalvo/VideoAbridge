@@ -171,6 +171,24 @@ public sealed class Timeline
         return Ok(new Timeline(Duration, newMarkers, newSegments, Joins, Settings));
     }
 
+    /// <summary>
+    /// Whether <see cref="RemoveMarker"/> would succeed for this id (not scene-detect, not a keep/delete boundary).
+    /// </summary>
+    public bool CanRemoveMarker(Guid markerId) => GetRemoveMarkerBlockReason(markerId) is null;
+
+    /// <summary>Human-readable reason <see cref="RemoveMarker"/> would fail, or null if it would succeed.</summary>
+    public string? GetRemoveMarkerBlockReason(Guid markerId)
+    {
+        var index = Markers.FindIndex(m => m.Id == markerId);
+        if (index < 0)
+            return "Marker was not found.";
+        if (Markers[index].Source == MarkerSource.SceneDetect)
+            return "Scene-detect markers cannot be deleted.";
+        if (Segments[index].IsDeleted != Segments[index + 1].IsDeleted)
+            return "Cannot delete a marker that separates keep and delete segments.";
+        return null;
+    }
+
     public Result<Timeline> RemoveMarker(Guid markerId)
     {
         var index = Markers.FindIndex(m => m.Id == markerId);
@@ -202,6 +220,31 @@ public sealed class Timeline
 
     public Result<Timeline> RestoreBetween(Guid boundaryIdA, Guid boundaryIdB) =>
         ApplyDeletionFlags(boundaryIdA, boundaryIdB, deleted: false);
+
+    /// <summary>
+    /// True when the open range between the boundaries contains at least one segment whose
+    /// deleted flag equals <paramref name="isDeleted"/>.
+    /// </summary>
+    public bool RangeContainsSegment(Guid boundaryIdA, Guid boundaryIdB, bool isDeleted)
+    {
+        if (!TryGetBoundaryTime(boundaryIdA, out var timeA)
+            || !TryGetBoundaryTime(boundaryIdB, out var timeB)
+            || timeA >= timeB)
+        {
+            return false;
+        }
+
+        var boundaries = GetBoundaries();
+        for (var i = 0; i < Segments.Count; i++)
+        {
+            var segStart = boundaries[i];
+            var segEnd = boundaries[i + 1];
+            if (segStart >= timeA && segEnd <= timeB && Segments[i].IsDeleted == isDeleted)
+                return true;
+        }
+
+        return false;
+    }
 
     public Result<Timeline> RestoreDeletedRun(Guid deletedRunId)
     {

@@ -50,6 +50,9 @@ public class TimelineTests
         var timeline = CreateWithMarkers(10, 20);
         timeline = timeline.DeleteBetween(timeline.Markers[0].Id, timeline.Markers[1].Id).RequireOk();
 
+        timeline.CanRemoveMarker(timeline.Markers[0].Id).Should().BeFalse();
+        timeline.GetRemoveMarkerBlockReason(timeline.Markers[0].Id)
+            .Should().Contain("separates keep and delete");
         var error = timeline.RemoveMarker(timeline.Markers[0].Id).RequireError();
         error.Code.Should().Be("MarkerIsBoundary");
     }
@@ -72,6 +75,22 @@ public class TimelineTests
         var runs = result.GetDeletedRuns();
         runs.Should().ContainSingle(r => r.IsInterior);
         runs[0].Join!.Mode.Should().Be(TransitionMode.HardCut);
+    }
+
+    [Fact]
+    public void RangeContainsSegmentReflectsDeletedFlags()
+    {
+        var timeline = CreateWithMarkers(10, 20);
+        var left = timeline.Markers[0].Id;
+        var right = timeline.Markers[1].Id;
+
+        timeline.RangeContainsSegment(Timeline.StartBoundId, left, isDeleted: false).Should().BeTrue();
+        timeline.RangeContainsSegment(Timeline.StartBoundId, left, isDeleted: true).Should().BeFalse();
+
+        timeline = timeline.DeleteBetween(Timeline.StartBoundId, left).RequireOk();
+        timeline.RangeContainsSegment(Timeline.StartBoundId, left, isDeleted: false).Should().BeFalse();
+        timeline.RangeContainsSegment(Timeline.StartBoundId, left, isDeleted: true).Should().BeTrue();
+        timeline.RangeContainsSegment(left, right, isDeleted: false).Should().BeTrue();
     }
 
     [Fact]
