@@ -29,17 +29,24 @@ public sealed class AudioPeakEnvelope
             : bucketDuration;
         _minima = minima;
         _maxima = maxima;
+        PeakAbs = ComputePeakAbs(minima, maxima);
     }
 
     public TimeSpan Duration { get; }
 
     public TimeSpan BucketDuration { get; }
 
+    /// <summary>Largest |sample| in the envelope; used to peak-normalize <see cref="Sample"/>.</summary>
+    public float PeakAbs { get; }
+
     public int Count => _minima.Length;
 
     public bool IsEmpty => Count == 0;
 
-    /// <summary>Samples the envelope at <paramref name="sourceTime"/> (linear bucket pick).</summary>
+    /// <summary>
+    /// Samples the envelope at <paramref name="sourceTime"/> (bucket pick),
+    /// peak-normalized so the loudest bucket is ±1.
+    /// </summary>
     public void Sample(TimeSpan sourceTime, out float min, out float max)
     {
         if (IsEmpty)
@@ -52,7 +59,24 @@ public sealed class AudioPeakEnvelope
         var bucketSeconds = Math.Max(BucketDuration.TotalSeconds, 1e-9);
         var index = (int)Math.Floor(sourceTime.TotalSeconds / bucketSeconds);
         index = Math.Clamp(index, 0, Count - 1);
-        min = _minima[index];
-        max = _maxima[index];
+        var scale = 1f / PeakAbs;
+        min = _minima[index] * scale;
+        max = _maxima[index] * scale;
+    }
+
+    private static float ComputePeakAbs(float[] minima, float[] maxima)
+    {
+        float peak = 0;
+        for (var i = 0; i < minima.Length; i++)
+        {
+            var a = Math.Abs(minima[i]);
+            var b = Math.Abs(maxima[i]);
+            if (a > peak)
+                peak = a;
+            if (b > peak)
+                peak = b;
+        }
+
+        return peak > 1e-6f ? peak : 1f;
     }
 }

@@ -28,6 +28,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly VideoExporter _exporter = new();
     private readonly AudioPeakExtractor _audioPeaks = new();
     private readonly MarkerCacheService _markerCache = CreateMarkerCache();
+    private readonly RecentFilesService _recentFiles = CreateRecentFiles();
     private readonly EditHistory _editHistory = new();
     private CancellationTokenSource? _exportCts;
     private CancellationTokenSource? _sceneDetectCts;
@@ -50,6 +51,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     private TimeSpan? _seekGateTarget;
     private DateTime _seekGateUntilUtc;
     private bool _inCrossfade;
+    private bool _committingVersionRename;
 
     [ObservableProperty] private string? _videoPath;
     [ObservableProperty] private Timeline? _timeline;
@@ -102,6 +104,9 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     public ObservableCollection<Guid> SelectedMarkerIds { get; } = [];
     public ObservableCollection<LongTaskItem> Tasks { get; } = [];
     public ObservableCollection<VersionTabViewModel> VersionTabs { get; } = [];
+    public ObservableCollection<RecentFileItem> RecentFiles { get; } = [];
+
+    public bool HasRecentFiles => RecentFiles.Count > 0;
 
     [ObservableProperty] private bool _isTasksPaneOpen;
 
@@ -113,9 +118,14 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public string TasksPaneCollapsedLabel => $"Tasks ({RunningTaskCount})";
 
-    public bool ShowVersionTabs => VersionTabs.Count > 1;
+    public bool ShowVersionTabs => HasVideoLoaded;
 
     public bool HasVideoLoaded => VideoPath is not null && _versionSet is not null;
+
+    public string WindowTitle =>
+        string.IsNullOrEmpty(VideoPath)
+            ? "VideoAbridge"
+            : $"VideoAbridge - {Path.GetFileName(VideoPath)}";
 
     /// <summary>Latest window placement restored from cache (MainWindow applies it).</summary>
     public WindowPlacementDto? PendingWindowPlacement { get; private set; }
@@ -141,6 +151,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             });
         };
         SelectedMarkerIds.CollectionChanged += OnSelectedMarkerIdsChanged;
+        RefreshRecentFiles();
         RefreshStatusBar();
     }
 
@@ -158,6 +169,9 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         CaptureActiveViewState();
         PersistMarkerCache(force: false);
     }
+
+    partial void OnVideoPathChanged(string? value) =>
+        OnPropertyChanged(nameof(WindowTitle));
 
     partial void OnIsDetectingScenesChanged(bool value)
     {
@@ -418,12 +432,48 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     public Task OpenVideoPathAsync(string path) =>
         LoadVideoAsync(path, runSceneDetect: !IsSkipSceneDetectEnabled());
 
+    [RelayCommand]
+    private async Task OpenRecentVideoAsync(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        if (!File.Exists(path))
+        {
+            try
+            {
+                RefreshRecentFiles(_recentFiles.Remove(path));
+            }
+            catch (IOException)
+            {
+                RefreshRecentFiles();
+            }
+            catch (UnauthorizedAccessException)
+            {
+                RefreshRecentFiles();
+            }
+
+            ReportError($"File not found:\n{path}");
+            return;
+        }
+
+        await LoadVideoAsync(path, runSceneDetect: true).ConfigureAwait(true);
+    }
+
     private static MarkerCacheService CreateMarkerCache()
     {
         var dir = Environment.GetEnvironmentVariable("VIDEOABRIDGE_MARKER_CACHE");
         return string.IsNullOrWhiteSpace(dir)
             ? new MarkerCacheService()
             : new MarkerCacheService(dir);
+    }
+
+    private static RecentFilesService CreateRecentFiles()
+    {
+        var path = Environment.GetEnvironmentVariable("VIDEOABRIDGE_RECENT_FILES");
+        return string.IsNullOrWhiteSpace(path)
+            ? new RecentFilesService()
+            : new RecentFilesService(path);
     }
 
     private static bool IsSkipSceneDetectEnabled() =>
@@ -463,20 +513,89 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         if (_versionSet is null)
             return;
 
-        if (!TryPromptVersionName(
-                "Rename Version",
-                "New name:",
-                suggested: _versionSet.Active.Name,
-                out var name))
+        BeginInlineRename(_versionSet.ActiveVersionId);
+    }
+
+    /// <summary>Creates a version from shared scenes with an auto name, then starts inline rename.</summary>
+    [RelayCommand(CanExecute = nameof(CanManageVersions))]
+    private void AddVersionTab()
+    {
+        if (_versionSet is null)
             return;
 
-        _versionSet.RenameActive(name).Match(
+        var name = SuggestNewVersionName();
+        ApplyVersionResult(_versionSet.CreateVersionFromScenes(name));
+        if (_versionSet is not null)
+            BeginInlineRename(_versionSet.ActiveVersionId);
+    }
+
+    internal void BeginInlineRename(Guid versionId)
+    {
+        if (!CanManageVersions())
+            return;
+
+        foreach (var tab in VersionTabs)
+        {
+            if (tab.Id == versionId)
+                tab.BeginEdit();
+            else if (tab.IsEditing)
+                tab.CancelEdit();
+        }
+    }
+
+    /// <summary>Returns true when editing ended (committed or cancelled).</summary>
+    internal bool CommitVersionRename(VersionTabViewModel tab)
+    {
+        ArgumentNullException.ThrowIfNull(tab);
+        if (_committingVersionRename || !tab.IsEditing || _versionSet is null)
+            return !tab.IsEditing;
+
+        var trimmed = tab.EditName.Trim();
+        if (trimmed.Length == 0
+            || string.Equals(trimmed, tab.Name, StringComparison.Ordinal))
+        {
+            tab.CancelEdit();
+            return true;
+        }
+
+        _committingVersionRename = true;
+        try
+        {
+            var committed = false;
+            _versionSet.Rename(tab.Id, trimmed).Match(
+                next =>
+                {
+                    _versionSet = next;
+                    tab.CancelEdit();
+                    SyncVersionTabs();
+                    PersistMarkerCache(force: true);
+                    RefreshStatusBar();
+                    committed = true;
+                },
+                error =>
+                {
+                    tab.EditName = tab.Name;
+                    ReportError(error.Message);
+                });
+            return committed;
+        }
+        finally
+        {
+            _committingVersionRename = false;
+        }
+    }
+
+    internal void ReorderVersion(Guid versionId, int newIndex)
+    {
+        if (_versionSet is null || !CanManageVersions())
+            return;
+
+        _versionSet.Reorder(versionId, newIndex).Match(
             next =>
             {
                 _versionSet = next;
                 SyncVersionTabs();
                 PersistMarkerCache(force: true);
-                RefreshStatusBar();
             },
             error => ReportError(error.Message));
     }
@@ -486,6 +605,9 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         if (_versionSet is null || versionId == _versionSet.ActiveVersionId)
             return;
+
+        foreach (var tab in VersionTabs.Where(t => t.IsEditing))
+            tab.CancelEdit();
 
         PersistMarkerCache(force: true);
         ApplyVersionResult(_versionSet.SetActive(versionId));
@@ -578,6 +700,24 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         return candidate;
     }
 
+    private string SuggestNewVersionName()
+    {
+        if (_versionSet is null)
+            return "Version 2";
+
+        var n = _versionSet.Versions.Count + 1;
+        string candidate;
+        do
+        {
+            candidate = $"Version {n}";
+            n++;
+        }
+        while (_versionSet.Versions.Any(v =>
+                   string.Equals(v.Name, candidate, StringComparison.OrdinalIgnoreCase)));
+
+        return candidate;
+    }
+
     [RelayCommand(CanExecute = nameof(CanGoToBeginning))]
     private void GoToBeginning()
     {
@@ -650,7 +790,13 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         if (Timeline is null)
             return;
 
-        Apply(Timeline.AddMarker(Playhead, MarkerSource.User));
+        var id = Guid.NewGuid();
+        Apply(Timeline.AddMarker(Playhead, MarkerSource.User, id));
+        if (Timeline is null || Timeline.Markers.All(m => m.Id != id))
+            return;
+
+        ClearMarkerSelection();
+        SelectedMarkerIds.Add(id);
     }
 
     private bool CanAddMarkerAtPlayhead() => GetAddMarkerBlockReason() is null;
@@ -691,37 +837,52 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             {
                 SelectedMarkerIds.Clear();
                 SelectedMarkerIds.Add(markerId);
-                return;
             }
-
-            var left = selected[0];
-            var right = selected[1];
-
-            if (clicked.Time > left.Time && clicked.Time < right.Time)
+            else
             {
-                // Between the two: keep only the clicked marker.
-                SelectedMarkerIds.Clear();
-                SelectedMarkerIds.Add(markerId);
-                return;
-            }
+                var left = selected[0];
+                var right = selected[1];
 
-            if (!extendSelection)
-            {
-                SelectedMarkerIds.Clear();
-                SelectedMarkerIds.Add(markerId);
-                return;
+                if (clicked.Time > left.Time && clicked.Time < right.Time)
+                {
+                    // Between the two: keep only the clicked marker.
+                    SelectedMarkerIds.Clear();
+                    SelectedMarkerIds.Add(markerId);
+                }
+                else if (!extendSelection)
+                {
+                    SelectedMarkerIds.Clear();
+                    SelectedMarkerIds.Add(markerId);
+                }
+                else
+                {
+                    // Shift+click outside: drop the nearest selected marker, keep the far one, add clicked.
+                    var nearestId = AbsDiff(clicked.Time, left.Time) <= AbsDiff(clicked.Time, right.Time)
+                        ? left.Id
+                        : right.Id;
+                    SelectedMarkerIds.Remove(nearestId);
+                    SelectedMarkerIds.Add(markerId);
+                }
             }
-
-            // Shift+click outside: drop the nearest selected marker, keep the far one, add clicked.
-            var nearestId = AbsDiff(clicked.Time, left.Time) <= AbsDiff(clicked.Time, right.Time)
-                ? left.Id
-                : right.Id;
-            SelectedMarkerIds.Remove(nearestId);
+        }
+        else
+        {
             SelectedMarkerIds.Add(markerId);
-            return;
         }
 
-        SelectedMarkerIds.Add(markerId);
+        SeekPlayheadToMarker(markerId);
+    }
+
+    private void SeekPlayheadToMarker(Guid markerId)
+    {
+        if (Timeline is null)
+            return;
+
+        var marker = Timeline.Markers.FirstOrDefault(m => m.Id == markerId);
+        if (marker is null)
+            return;
+
+        SeekPlayhead(marker.Time);
     }
 
     [RelayCommand(CanExecute = nameof(CanDeleteMarker))]
@@ -1603,20 +1764,49 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void SyncVersionTabs()
     {
-        VersionTabs.Clear();
         if (_versionSet is null)
         {
+            VersionTabs.Clear();
             OnPropertyChanged(nameof(ShowVersionTabs));
             OnPropertyChanged(nameof(HasVideoLoaded));
             return;
         }
 
-        foreach (var version in _versionSet.Versions)
+        var versions = _versionSet.Versions;
+        var activeId = _versionSet.ActiveVersionId;
+
+        for (var i = VersionTabs.Count - 1; i >= 0; i--)
         {
-            VersionTabs.Add(new VersionTabViewModel(
-                version.Id,
-                version.Name,
-                version.Id == _versionSet.ActiveVersionId));
+            if (versions.All(v => v.Id != VersionTabs[i].Id))
+                VersionTabs.RemoveAt(i);
+        }
+
+        for (var i = 0; i < versions.Count; i++)
+        {
+            var version = versions[i];
+            var isActive = version.Id == activeId;
+            var existingIndex = -1;
+            for (var j = 0; j < VersionTabs.Count; j++)
+            {
+                if (VersionTabs[j].Id == version.Id)
+                {
+                    existingIndex = j;
+                    break;
+                }
+            }
+
+            if (existingIndex < 0)
+            {
+                VersionTabs.Insert(i, new VersionTabViewModel(version.Id, version.Name, isActive));
+                continue;
+            }
+
+            var tab = VersionTabs[existingIndex];
+            if (!tab.IsEditing)
+                tab.Name = version.Name;
+            tab.IsActive = isActive;
+            if (existingIndex != i)
+                VersionTabs.Move(existingIndex, i);
         }
 
         OnPropertyChanged(nameof(ShowVersionTabs));
@@ -1628,6 +1818,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         CreateVersionCommand.NotifyCanExecuteChanged();
         DuplicateVersionCommand.NotifyCanExecuteChanged();
         RenameVersionCommand.NotifyCanExecuteChanged();
+        AddVersionTabCommand.NotifyCanExecuteChanged();
         DeleteVersionCommand.NotifyCanExecuteChanged();
         SelectVersionCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CreateVersionToolTip));
@@ -2108,6 +2299,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             _editHistory.Clear();
             ApplyUiStateFromCache(cacheEntry);
             NotifyTimelineActionCommands();
+            RememberRecentFile(fullPath);
             RefreshStatusBar();
             if (versionSet.ActiveTimeline.Markers.Count > 0)
                 _ = RefreshThumbnailsAsync();
@@ -2140,6 +2332,49 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
 
         if (runSceneDetect && VideoPath is { } loadedPath)
             _ = RunSceneDetectInBackgroundAsync(loadedPath, duration);
+    }
+
+    private void RememberRecentFile(string path)
+    {
+        try
+        {
+            RefreshRecentFiles(_recentFiles.Add(path));
+        }
+        catch (IOException)
+        {
+            // Recent-file persistence is best-effort.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Recent-file persistence is best-effort.
+        }
+    }
+
+    private void RefreshRecentFiles(IReadOnlyList<string>? paths = null)
+    {
+        var list = paths ?? _recentFiles.Load();
+        RecentFiles.Clear();
+        var nameCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in list)
+        {
+            var fileName = FileNameOrPath(path);
+            nameCounts[fileName] = nameCounts.GetValueOrDefault(fileName) + 1;
+        }
+
+        foreach (var path in list)
+        {
+            var fileName = FileNameOrPath(path);
+            var displayName = nameCounts[fileName] > 1 ? path : fileName;
+            RecentFiles.Add(new RecentFileItem(path, displayName));
+        }
+
+        OnPropertyChanged(nameof(HasRecentFiles));
+    }
+
+    private static string FileNameOrPath(string path)
+    {
+        var name = Path.GetFileName(path);
+        return string.IsNullOrEmpty(name) ? path : name;
     }
 
     private void CancelAudioPeaks()

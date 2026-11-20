@@ -4,7 +4,7 @@
         xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
         xmlns:controls="clr-namespace:VideoAbridge.Controls"
         xmlns:vm="clr-namespace:VideoAbridge.ViewModels"
-        Title="VideoAbridge"
+        Title="{Binding WindowTitle}"
         AutomationProperties.AutomationId="MainWindow"
         Height="820"
         Width="1280"
@@ -198,6 +198,19 @@
                 <MenuItem Header="Open _Video…"
                           Command="{Binding OpenVideoCommand}"
                           InputGestureText="Ctrl+O"/>
+                <MenuItem Header="_Recent Files"
+                          ItemsSource="{Binding RecentFiles}"
+                          IsEnabled="{Binding HasRecentFiles}">
+                    <MenuItem.ItemContainerStyle>
+                        <Style TargetType="MenuItem">
+                            <Setter Property="Header" Value="{Binding DisplayName}"/>
+                            <Setter Property="ToolTip" Value="{Binding FullPath}"/>
+                            <Setter Property="Command"
+                                    Value="{Binding DataContext.OpenRecentVideoCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                            <Setter Property="CommandParameter" Value="{Binding FullPath}"/>
+                        </Style>
+                    </MenuItem.ItemContainerStyle>
+                </MenuItem>
                 <Separator/>
                 <MenuItem Header="E_xport…"
                           Command="{Binding ExportCommand}"
@@ -296,7 +309,7 @@
                           InputGestureText="Ctrl+Shift+N"
                           ToolTip="{Binding DuplicateVersionToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
-                <MenuItem Header="_Rename Version…"
+                <MenuItem Header="_Rename Version"
                           Command="{Binding RenameVersionCommand}"
                           InputGestureText="F2"
                           ToolTip="{Binding RenameVersionToolTip}"
@@ -306,49 +319,116 @@
 
         <Border DockPanel.Dock="Top"
                 Background="#252526"
-                BorderBrush="#3F3F46"
-                BorderThickness="0,0,0,1"
                 Visibility="{Binding ShowVersionTabs, Converter={StaticResource BoolToVis}}">
-            <ItemsControl ItemsSource="{Binding VersionTabs}">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <StackPanel Orientation="Horizontal"/>
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate DataType="{x:Type vm:VersionTabViewModel}">
-                        <Border Margin="4,4,0,4"
-                                Padding="10,4"
-                                CornerRadius="3"
-                                Cursor="Hand"
-                                Background="#3E3E42"
-                                MouseLeftButtonUp="VersionTab_MouseLeftButtonUp">
-                            <Border.Style>
-                                <Style TargetType="Border">
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding IsActive}" Value="True">
-                                            <Setter Property="Background" Value="#5C7A9E"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Border.Style>
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="{Binding Name}"
-                                           Foreground="White"
-                                           VerticalAlignment="Center"
-                                           Margin="0,0,8,0"/>
-                                <Button Content="×"
-                                        Style="{StaticResource VersionTabCloseButton}"
-                                        ToolTip="{Binding DataContext.DeleteVersionToolTip, RelativeSource={RelativeSource AncestorType=Window}}"
-                                        ToolTipService.ShowOnDisabled="True"
-                                        Command="{Binding DataContext.DeleteVersionCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                        CommandParameter="{Binding Id}"
-                                        Click="VersionTabClose_Click"/>
-                            </StackPanel>
-                        </Border>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+            <StackPanel Orientation="Horizontal">
+                <ItemsControl ItemsSource="{Binding VersionTabs}"
+                              AllowDrop="True"
+                              DragOver="VersionTabs_DragOver"
+                              Drop="VersionTabs_Drop">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:VersionTabViewModel}">
+                            <Border Padding="10,4"
+                                    Cursor="Hand"
+                                    AllowDrop="True"
+                                    PreviewMouseLeftButtonDown="VersionTab_PreviewMouseLeftButtonDown"
+                                    PreviewMouseMove="VersionTab_PreviewMouseMove"
+                                    MouseLeftButtonUp="VersionTab_MouseLeftButtonUp"
+                                    DragOver="VersionTab_DragOver"
+                                    Drop="VersionTab_Drop"
+                                    GiveFeedback="VersionTab_GiveFeedback">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="#3E3E42"/>
+                                        <Setter Property="CornerRadius" Value="3,3,0,0"/>
+                                        <Setter Property="Margin" Value="4,4,0,2"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                                <Setter Property="Background" Value="#2D2D30"/>
+                                                <Setter Property="Margin" Value="4,4,0,0"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsEditing}" Value="True">
+                                                <Setter Property="Cursor" Value="IBeam"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <StackPanel Orientation="Horizontal">
+                                    <Grid MinWidth="40" Margin="0,0,8,0">
+                                        <TextBlock Text="{Binding Name}"
+                                                   Foreground="White"
+                                                   VerticalAlignment="Center">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                    <Setter Property="FontWeight" Value="Normal"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                                            <Setter Property="FontWeight" Value="Bold"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding IsEditing}" Value="True">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                        <TextBox Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}"
+                                                 MinWidth="60"
+                                                 Padding="2,1"
+                                                 Background="#1E1E1E"
+                                                 Foreground="White"
+                                                 FontWeight="Bold"
+                                                 BorderBrush="#5C7A9E"
+                                                 BorderThickness="1"
+                                                 CaretBrush="White"
+                                                 VerticalAlignment="Center"
+                                                 IsVisibleChanged="VersionTabRenameBox_IsVisibleChanged"
+                                                 KeyDown="VersionTabRenameBox_KeyDown"
+                                                 LostFocus="VersionTabRenameBox_LostFocus">
+                                            <TextBox.Style>
+                                                <Style TargetType="TextBox">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsEditing}" Value="True">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBox.Style>
+                                        </TextBox>
+                                    </Grid>
+                                    <Button Content="×"
+                                            Style="{StaticResource VersionTabCloseButton}"
+                                            ToolTip="{Binding DataContext.DeleteVersionToolTip, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            ToolTipService.ShowOnDisabled="True"
+                                            Command="{Binding DataContext.DeleteVersionCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding Id}"
+                                            Click="VersionTabClose_Click"/>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Button Content="+"
+                        Margin="4,4,4,2"
+                        Padding="10,4"
+                        MinWidth="32"
+                        FontSize="14"
+                        FontWeight="Bold"
+                        Foreground="White"
+                        Background="#3E3E42"
+                        BorderThickness="0"
+                        Cursor="Hand"
+                        ToolTip="{Binding CreateVersionToolTip}"
+                        ToolTipService.ShowOnDisabled="True"
+                        Command="{Binding AddVersionTabCommand}"
+                        Style="{StaticResource ToolbarButtonBase}"/>
+            </StackPanel>
         </Border>
 
         <StatusBar DockPanel.Dock="Bottom" Background="#007ACC">
@@ -360,7 +440,7 @@
             </StatusBarItem>
         </StatusBar>
 
-        <Grid Margin="8">
+        <Grid Margin="8,0,8,8">
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" MinHeight="240"/>
                 <RowDefinition Height="Auto"/>

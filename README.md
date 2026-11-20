@@ -17,9 +17,9 @@ VideoAbridge is not a general NLE and not a multi-clip editor. You open one fini
 - **Undo / redo** — full edit history for the active version (Ctrl+Z / Ctrl+Y)
 
 ### Versions
-- **Multiple abridged versions** of the same source video (tabs when more than one exists)
+- **Multiple abridged versions** of the same source video (tab bar with `+` while a video is open)
 - **New version from scenes** — start a version that keeps only shared scene-detect markers
-- **Duplicate / rename / delete** versions; scene markers stay shared across versions
+- **Duplicate / rename / delete / reorder** versions (drag tabs; double-click or F2 renames inline); scene markers stay shared across versions
 
 ### Preview & playback
 - **LibVLC** playback of the source file with playhead sync to the timeline
@@ -33,6 +33,7 @@ VideoAbridge is not a general NLE and not a multi-clip editor. You open one fini
 
 ### Persistence & export
 - **Automatic cache** of versions, markers, cuts, joins, fades, Edit/Preview mode, per-mode zoom/scroll/playhead, Tasks pane state, and window placement keyed by file content fingerprint (reopen the same file → restore work)
+- **Recent Files** — File menu submenu of recently opened videos (persisted under LocalAppData)
 - **Export** — FFmpeg writes an abridged MP4 (kept clips + joins + fades)
 - **Tasks pane** — sidebar for long jobs (opens for export/scene detect; waveform runs quietly), with cancel / open-result actions
 
@@ -56,7 +57,7 @@ Shortcuts are ignored while typing in a text box.
 | Tab | Toggle Edit / Preview |
 | Ctrl+1 / Ctrl+0 | Zoom to abridged content / Zoom to fit |
 | Ctrl+N / Ctrl+Shift+N | New / Duplicate Version |
-| F2 | Rename Version |
+| F2 | Rename Version (inline on the active tab) |
 | Ctrl+Shift+T | Expand / collapse Tasks pane |
 
 ## Requirements
@@ -97,7 +98,7 @@ Notable changes live in [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https:/
 
 ## Typical workflow
 
-1. **File → Open Video** — probes duration, restores cached versions/edits if present, resumes scene detection when needed.
+1. **File → Open Video** (or **Recent Files**) — probes duration, restores cached versions/edits if present, resumes scene detection when needed.
 2. Add markers (manually and/or **Detect Scenes**), select boundaries, **Delete** / **Restore Section** (or from start / to end).
 3. Click a **Cut** / **XF** under a deleted interior run to set hard cut vs crossfade; set start/end fades in the side panel (`0` = off).
 4. Toggle **Preview** to scrub the abridged result; use **View → Zoom to abridged content / Zoom to fit** as needed.

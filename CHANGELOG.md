@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2026.11.5] - 2026-11-20
+
+### Added
+
+- File → Recent Files submenu listing recently opened videos (persisted locally; missing entries drop on reopen).
+- Main window title shows the opened video file name (`VideoAbridge - FILENAME`).
+- Version tab bar (with a `+` tab) while a video is open; drag tabs to reorder; double-click or F2 renames inline on the tab.
+
+### Changed
+
+- Version → Rename Version uses the inline tab editor instead of a dialog.
+- Active version tab is bold and flush with the content area (no separator under the tab bar).
+- Adding a marker clears the current selection and selects the new marker.
+- Timeline waveform is peak-normalized and drawn at 80% of the keep-bar height.
+- Edit timeline shows grey `m:ss` duration labels between consecutive markers when the span is kept.
+- Selecting a marker moves the playhead to that marker.
+
 ## [2026.11.4] - 2026-11-19
 
 ### Added
@@ -50,7 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial GitHub Release of VideoAbridge: open a single finished video, mark and delete sections, scene detection, multiple abridged versions, Edit/Preview modes, joins/fades, undo/redo, marker cache, and FFmpeg export.
 - CI release workflow publishing a self-contained Windows x64 build zip.
 
-[Unreleased]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.4...HEAD
+[Unreleased]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.5...HEAD
+[2026.11.5]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.4...v2026.11.5
 [2026.11.4]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.3...v2026.11.4
 [2026.11.3]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.2...v2026.11.3
 [2026.11.2]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.1...v2026.11.2

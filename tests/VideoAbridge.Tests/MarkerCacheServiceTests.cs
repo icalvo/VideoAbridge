@@ -100,6 +100,29 @@ public class MarkerCacheServiceTests
         cache.TryLoadVersionSet(video, TimeSpan.FromSeconds(43)).Should().BeNull();
     }
 
+    [Fact]
+    public void SaveAndTryLoadPreservesVersionOrder()
+    {
+        using var dir = new TempDir();
+        var video = dir.WriteFile("clip.bin", CreateBytes(200));
+        var duration = TimeSpan.FromSeconds(42);
+        var cache = new MarkerCacheService(Path.Combine(dir.Path, "MarkerCache"));
+
+        var set = AbridgedVersionSet.CreateDefault(duration);
+        set = set.CreateVersionFromScenes("Two").RequireOk();
+        set = set.CreateVersionFromScenes("Three").RequireOk();
+        var lastId = set.ActiveVersionId;
+        set = set.Reorder(lastId, 0).RequireOk();
+        set.Versions.Select(v => v.Name).Should().Equal("Three", "Default", "Two");
+
+        cache.SaveVersionSet(video, set);
+
+        var loaded = cache.TryLoadVersionSet(video, duration);
+        loaded.Should().NotBeNull();
+        loaded.Versions.Select(v => v.Name).Should().Equal("Three", "Default", "Two");
+        loaded.ActiveVersionId.Should().Be(lastId);
+    }
+
     private static byte[] CreateBytes(int length)
     {
         var bytes = new byte[length];

@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Specialized;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -71,6 +72,7 @@ public partial class TimelineControl : UserControl
     public const double MinOverlayPixels = 6;
 
     private static readonly Brush WaveformBrush = CreateFrozenBrush(0x99, 0x00, 0x00, 0x00);
+    private static readonly Brush KeepDurationLabelBrush = CreateFrozenBrush(0x9A, 0x9A, 0x9E);
 
     private Line? _playheadLine;
     private TimeSpan _fittedDuration = TimeSpan.Zero;
@@ -642,6 +644,8 @@ public partial class TimelineControl : UserControl
 
         DrawEditWaveform(timeline.Duration, pps, trackTop, trackHeight);
 
+        DrawKeepDurationLabels(timeline, pps, trackTop, trackHeight);
+
         foreach (var run in timeline.GetDeletedRuns())
         {
             var left = run.Range.Start.TotalSeconds * pps;
@@ -868,7 +872,8 @@ public partial class TimelineControl : UserControl
             return;
 
         var midY = trackTop + trackHeight / 2;
-        var amp = trackHeight * 0.45;
+        // Peak-normalized samples are ±1; 0.4 from center → 80% of bar height peak-to-peak.
+        var amp = trackHeight * 0.4;
         var step = trackWidth / columns.Length;
 
         var geometry = new StreamGeometry { FillRule = FillRule.Nonzero };
@@ -901,6 +906,45 @@ public partial class TimelineControl : UserControl
             IsHitTestVisible = false
         };
         RootCanvas.Children.Add(path);
+    }
+
+    private void DrawKeepDurationLabels(
+        Timeline timeline,
+        double pps,
+        double trackTop,
+        double trackHeight)
+    {
+        for (var i = 0; i < timeline.Markers.Count - 1; i++)
+        {
+            // Segment between markers[i] and markers[i+1] is Segments[i+1].
+            if (timeline.Segments[i + 1].IsDeleted)
+                continue;
+
+            var leftMarker = timeline.Markers[i];
+            var rightMarker = timeline.Markers[i + 1];
+            var left = leftMarker.Time.TotalSeconds * pps;
+            var right = rightMarker.Time.TotalSeconds * pps;
+            var labelText = FormatKeepDuration(rightMarker.Time - leftMarker.Time);
+            var label = new TextBlock
+            {
+                Text = labelText,
+                Foreground = KeepDurationLabelBrush,
+                FontSize = 10,
+                IsHitTestVisible = false
+            };
+            var mid = (left + right) / 2;
+            Canvas.SetLeft(label, mid - Math.Max(12, labelText.Length * 3.2));
+            Canvas.SetTop(label, trackTop + trackHeight + 4);
+            RootCanvas.Children.Add(label);
+        }
+    }
+
+    private static string FormatKeepDuration(TimeSpan duration)
+    {
+        var totalSeconds = Math.Max(0, (int)Math.Round(duration.TotalSeconds, MidpointRounding.AwayFromZero));
+        var minutes = totalSeconds / 60;
+        var seconds = totalSeconds % 60;
+        return string.Format(CultureInfo.InvariantCulture, "{0}:{1:00}", minutes, seconds);
     }
 
     private static string DeletedRunLabel(DeletedRun run, TimeSpan duration)

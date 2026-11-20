@@ -129,6 +129,24 @@ public sealed class AbridgedVersionSet
 
     public Result<AbridgedVersionSet> RenameActive(string name) => Rename(ActiveVersionId, name);
 
+    /// <summary>Moves a version to <paramref name="newIndex"/> (0-based) within the set.</summary>
+    public Result<AbridgedVersionSet> Reorder(Guid versionId, int newIndex)
+    {
+        if (newIndex < 0 || newIndex >= Versions.Count)
+            return Fail<AbridgedVersionSet>("InvalidVersionIndex", "Version index is out of range.");
+
+        var index = Versions.FindIndex(v => v.Id == versionId);
+        if (index < 0)
+            return Fail<AbridgedVersionSet>("VersionNotFound", "Version was not found.");
+
+        if (index == newIndex)
+            return Ok(this);
+
+        var version = Versions[index];
+        var updated = Versions.RemoveAt(index).Insert(newIndex, version);
+        return Ok(new AbridgedVersionSet(Duration, SceneDetectPosition, ActiveVersionId, updated));
+    }
+
     public Result<AbridgedVersionSet> Remove(Guid versionId)
     {
         if (Versions.Count <= 1)

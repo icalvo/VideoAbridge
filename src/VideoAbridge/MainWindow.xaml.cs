@@ -22,6 +22,8 @@ public partial class MainWindow : Window, IDisposable
     private bool _previewChromeVisible;
     private bool _applyingWindowPlacement;
     private bool _disposed;
+    private Point? _versionTabDragStart;
+    private bool _versionTabDragMoved;
 
     public MainWindow()
     {
@@ -242,10 +244,221 @@ public partial class MainWindow : Window, IDisposable
         top = Math.Clamp(top, work.Top, work.Bottom - Math.Min(height, work.Height));
     }
 
+    private void VersionTab_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: VersionTabViewModel tab } || tab.IsEditing)
+        {
+            ClearVersionTabDrag();
+            return;
+        }
+
+        if (e.ClickCount == 2)
+        {
+            ClearVersionTabDrag();
+            if (!tab.IsActive && _viewModel.SelectVersionCommand.CanExecute(tab.Id))
+                _viewModel.SelectVersionCommand.Execute(tab.Id);
+
+            _viewModel.BeginInlineRename(tab.Id);
+            e.Handled = true;
+            return;
+        }
+
+        _versionTabDragStart = e.GetPosition(this);
+        _versionTabDragMoved = false;
+    }
+
+    private void VersionTab_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_versionTabDragStart is null
+            || e.LeftButton != MouseButtonState.Pressed
+            || sender is not FrameworkElement element
+            || element.DataContext is not VersionTabViewModel tab
+            || tab.IsEditing)
+        {
+            return;
+        }
+
+        var pos = e.GetPosition(this);
+        var start = _versionTabDragStart.Value;
+        if (Math.Abs(pos.X - start.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(pos.Y - start.Y) < SystemParameters.MinimumVerticalDragDistance)
+        {
+            return;
+        }
+
+        _versionTabDragMoved = true;
+        var data = new DataObject(typeof(Guid), tab.Id);
+        DragDrop.DoDragDrop(element, data, DragDropEffects.Move);
+        ClearVersionTabDrag();
+    }
+
     private void VersionTab_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: VersionTabViewModel tab })
+        if (_versionTabDragMoved)
+        {
+            ClearVersionTabDrag();
+            return;
+        }
+
+        ClearVersionTabDrag();
+        if (sender is FrameworkElement { DataContext: VersionTabViewModel { IsEditing: false } tab })
             _viewModel.SelectVersionCommand.Execute(tab.Id);
+    }
+
+    private void VersionTab_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = TryGetVersionDragId(e, out _) ? DragDropEffects.Move : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void VersionTabs_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = TryGetVersionDragId(e, out _) ? DragDropEffects.Move : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void VersionTab_Drop(object sender, DragEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: VersionTabViewModel target }
+            || !TryGetVersionDragId(e, out var sourceId))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        if (sourceId == target.Id)
+            return;
+
+        var targetIndex = IndexOfVersionTab(target.Id);
+        if (targetIndex < 0)
+            return;
+
+        var pos = e.GetPosition((IInputElement)sender);
+        if (sender is FrameworkElement fe && pos.X > fe.ActualWidth / 2)
+            targetIndex++;
+
+        var sourceIndex = IndexOfVersionTab(sourceId);
+        if (sourceIndex < 0)
+            return;
+
+        if (sourceIndex < targetIndex)
+            targetIndex--;
+
+        if (targetIndex != sourceIndex)
+            _viewModel.ReorderVersion(sourceId, targetIndex);
+    }
+
+    private void VersionTabs_Drop(object sender, DragEventArgs e)
+    {
+        if (!TryGetVersionDragId(e, out var sourceId))
+            return;
+
+        e.Handled = true;
+        var lastIndex = _viewModel.VersionTabs.Count - 1;
+        if (lastIndex < 0)
+            return;
+
+        var sourceIndex = IndexOfVersionTab(sourceId);
+        if (sourceIndex < 0 || sourceIndex == lastIndex)
+            return;
+
+        _viewModel.ReorderVersion(sourceId, lastIndex);
+    }
+
+    private void VersionTab_GiveFeedback(object sender, GiveFeedbackEventArgs e)
+    {
+        e.UseDefaultCursors = true;
+        e.Handled = true;
+    }
+
+    private void VersionTabRenameBox_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (sender is not TextBox { IsVisible: true } box)
+            return;
+
+        Dispatcher.BeginInvoke(
+            () =>
+            {
+                if (!box.IsVisible)
+                    return;
+                box.Focus();
+                box.SelectAll();
+            },
+            DispatcherPriority.Input);
+    }
+
+    private void VersionTabRenameBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox { DataContext: VersionTabViewModel tab } box)
+            return;
+
+        if (e.Key == Key.Enter)
+        {
+            if (_viewModel.CommitVersionRename(tab))
+                Keyboard.ClearFocus();
+            else
+            {
+                box.Focus();
+                box.SelectAll();
+            }
+
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            tab.CancelEdit();
+            Keyboard.ClearFocus();
+            e.Handled = true;
+        }
+    }
+
+    private void VersionTabRenameBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is not TextBox { DataContext: VersionTabViewModel { IsEditing: true } tab } box)
+            return;
+
+        if (_viewModel.CommitVersionRename(tab))
+            return;
+
+        Dispatcher.BeginInvoke(
+            () =>
+            {
+                if (!tab.IsEditing)
+                    return;
+                box.Focus();
+                box.SelectAll();
+            },
+            DispatcherPriority.Input);
+    }
+
+    private int IndexOfVersionTab(Guid id)
+    {
+        for (var i = 0; i < _viewModel.VersionTabs.Count; i++)
+        {
+            if (_viewModel.VersionTabs[i].Id == id)
+                return i;
+        }
+
+        return -1;
+    }
+
+    private static bool TryGetVersionDragId(DragEventArgs e, out Guid id)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+        if (e.Data.GetDataPresent(typeof(Guid)) && e.Data.GetData(typeof(Guid)) is Guid guid)
+        {
+            id = guid;
+            return true;
+        }
+
+        id = default;
+        return false;
+    }
+
+    private void ClearVersionTabDrag()
+    {
+        _versionTabDragStart = null;
+        _versionTabDragMoved = false;
     }
 
     private void VersionTabClose_Click(object sender, RoutedEventArgs e) => e.Handled = true;

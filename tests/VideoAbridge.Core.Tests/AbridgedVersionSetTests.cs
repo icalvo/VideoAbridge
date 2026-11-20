@@ -112,4 +112,27 @@ public class AbridgedVersionSetTests
 
         set.SceneDetectPosition.Should().Be(TimeSpan.FromSeconds(12));
     }
+
+    [Fact]
+    public void ReorderMovesVersionAndKeepsActive()
+    {
+        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(30));
+        var firstId = set.ActiveVersionId;
+        set = set.CreateVersionFromScenes("Two").RequireOk();
+        var secondId = set.ActiveVersionId;
+        set = set.CreateVersionFromScenes("Three").RequireOk();
+        var thirdId = set.ActiveVersionId;
+
+        set = set.Reorder(thirdId, 0).RequireOk();
+        set.Versions.Select(v => v.Id).Should().Equal(thirdId, firstId, secondId);
+        set.ActiveVersionId.Should().Be(thirdId);
+    }
+
+    [Fact]
+    public void ReorderRejectsOutOfRangeIndex()
+    {
+        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(30));
+        var error = set.Reorder(set.ActiveVersionId, 1).RequireError();
+        error.Code.Should().Be("InvalidVersionIndex");
+    }
 }
