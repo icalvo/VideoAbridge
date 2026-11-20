@@ -4,11 +4,12 @@
 
 **Mission:** make it easy to produce short versions of a **single, already edited** video.
 
-VideoAbridge is not a general NLE and not a multi-clip editor. You open one finished cut, mark what to drop, and export a tighter cut—with optional alternate abridgements of the same source—without rebuilding the timeline from scratch.
+VideoAbridge is not a general [NLE](https://en.wikipedia.org/wiki/Non-linear_editing) tool and not a multi-clip editor. You open one finished cut, mark what to drop, and export a tighter cut—with optional alternate abridgements of the same source—without rebuilding the timeline from scratch.
 
 ## Features
 
 ### Editing the abridgement
+
 - **Markers** — place user markers at the playhead; select one or more to define section boundaries
 - **Delete / undelete sections** — remove the range between selected markers, or restore it; also delete from the start or through the end of the video
 - **Scene detection** — FFmpeg-based scene cuts become shared scene markers (protected from casual delete); detection resumes when you reopen a file
@@ -17,48 +18,53 @@ VideoAbridge is not a general NLE and not a multi-clip editor. You open one fini
 - **Undo / redo** — full edit history for the active version (Ctrl+Z / Ctrl+Y)
 
 ### Versions
+
 - **Multiple abridged versions** of the same source video (tab bar with `+` while a video is open)
 - **New version from scenes** — start a version that keeps only shared scene-detect markers
 - **Duplicate / rename / delete / reorder** versions (drag tabs; double-click or F2 renames inline); scene markers stay shared across versions
 
 ### Preview & playback
+
 - **LibVLC** playback of the source file with playhead sync to the timeline
 - **Edit vs Preview mode** — Edit shows the full source with deleted ranges; Preview shows the abridged timeline (kept sections only) with blackout / crossfade visuals approximating the export
 - Marker **thumbnails** along the timeline
 
 ### Timeline navigation
+
 - Click timeline to seek; Ctrl+Wheel to zoom
 - **Zoom to abridged content** — fit all undeleted sections in view
 - **Zoom to fit** — full zoom out over the whole displayed timeline
 
 ### Persistence & export
+
 - **Automatic cache** of versions, markers, cuts, joins, fades, Edit/Preview mode, per-mode zoom/scroll/playhead, Tasks pane state, and window placement keyed by file content fingerprint (reopen the same file → restore work)
 - **Recent Files** — File menu submenu of recently opened videos (persisted under LocalAppData)
 - **Export** — FFmpeg writes an abridged MP4 (kept clips + joins + fades)
 - **Tasks pane** — sidebar for long jobs (opens for export/scene detect; waveform runs quietly), with cancel / open-result actions
 
 ### Keyboard shortcuts
+
 Shortcuts are ignored while typing in a text box.
 
-| Shortcut | Action |
-| --- | --- |
-| Ctrl+O | Open Video |
-| Ctrl+E | Export |
-| Space | Play / Pause |
-| Home | Go to Beginning |
-| Ctrl+Z / Ctrl+Y | Undo / Redo |
-| M | Add Marker |
-| Delete | Delete Marker |
-| Ctrl+D | Delete Section |
-| Ctrl+Shift+D | Restore Section |
-| Ctrl+Shift+Home / End | Delete Section from Start / to End |
-| Ctrl+Alt+Home / End | Restore Section from Start / to End |
-| Ctrl+Shift+S | Detect Scenes |
-| Tab | Toggle Edit / Preview |
-| Ctrl+1 / Ctrl+0 | Zoom to abridged content / Zoom to fit |
-| Ctrl+N / Ctrl+Shift+N | New / Duplicate Version |
-| F2 | Rename Version (inline on the active tab) |
-| Ctrl+Shift+T | Expand / collapse Tasks pane |
+| Shortcut              | Action                                    |
+| --------------------- | ----------------------------------------- |
+| Ctrl+O                | Open Video                                |
+| Ctrl+E                | Export                                    |
+| Space                 | Play / Pause                              |
+| Home                  | Go to Beginning                           |
+| Ctrl+Z / Ctrl+Y       | Undo / Redo                               |
+| M                     | Add Marker                                |
+| Delete                | Delete Marker                             |
+| Ctrl+D                | Delete Section                            |
+| Ctrl+Shift+D          | Restore Section                           |
+| Ctrl+Shift+Home / End | Delete Section from Start / to End        |
+| Ctrl+Alt+Home / End   | Restore Section from Start / to End       |
+| Ctrl+Shift+S          | Detect Scenes                             |
+| Tab                   | Toggle Edit / Preview                     |
+| Ctrl+1 / Ctrl+0       | Zoom to abridged content / Zoom to fit    |
+| Ctrl+N / Ctrl+Shift+N | New / Duplicate Version                   |
+| F2                    | Rename Version (inline on the active tab) |
+| Ctrl+Shift+T          | Expand / collapse Tasks pane              |
 
 ## Requirements
 
