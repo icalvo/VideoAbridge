@@ -7,16 +7,23 @@ public class AbridgedVersionSetTests
     [Fact]
     public void CreateDefaultHasSingleDefaultVersion()
     {
-        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(60));
+        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(60)).RequireOk();
         set.Versions.Should().ContainSingle();
         set.Active.Name.Should().Be(AbridgedVersionSet.DefaultVersionName);
         set.ActiveTimeline.Markers.Should().BeEmpty();
     }
 
     [Fact]
+    public void CreateDefaultRejectsNonPositiveDuration()
+    {
+        var error = AbridgedVersionSet.CreateDefault(TimeSpan.Zero).RequireError();
+        error.Code.Should().Be("InvalidDuration");
+    }
+
+    [Fact]
     public void RemoveMarkerProtectsSceneDetectMarkers()
     {
-        var timeline = Timeline.Create(TimeSpan.FromSeconds(60));
+        var timeline = Timeline.Create(TimeSpan.FromSeconds(60)).RequireOk();
         timeline = timeline.AddMarker(TimeSpan.FromSeconds(10), MarkerSource.SceneDetect).RequireOk();
         var error = timeline.RemoveMarker(timeline.Markers[0].Id).RequireError();
         error.Code.Should().Be("SceneMarkerProtected");
@@ -25,13 +32,13 @@ public class AbridgedVersionSetTests
     [Fact]
     public void CreateVersionFromScenesCopiesSharedSceneMarkersOnly()
     {
-        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(100));
+        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(100)).RequireOk();
         var sceneId = Guid.NewGuid();
         set = set.AddSharedSceneMarker(TimeSpan.FromSeconds(20), sceneId).RequireOk();
         set = set.ReplaceActiveTimeline(
-            set.ActiveTimeline.AddMarker(TimeSpan.FromSeconds(40), MarkerSource.User).RequireOk());
+            set.ActiveTimeline.AddMarker(TimeSpan.FromSeconds(40), MarkerSource.User).RequireOk()).RequireOk();
         set = set.ReplaceActiveTimeline(
-            set.ActiveTimeline.DeleteBetween(sceneId, set.ActiveTimeline.Markers[^1].Id).RequireOk());
+            set.ActiveTimeline.DeleteBetween(sceneId, set.ActiveTimeline.Markers[^1].Id).RequireOk()).RequireOk();
 
         var created = set.CreateVersionFromScenes("Alt").RequireOk();
         created.Active.Name.Should().Be("Alt");
@@ -45,9 +52,9 @@ public class AbridgedVersionSetTests
     [Fact]
     public void DuplicateActiveClonesTimelineAndActivates()
     {
-        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(60));
+        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(60)).RequireOk();
         set = set.ReplaceActiveTimeline(
-            set.ActiveTimeline.AddMarker(TimeSpan.FromSeconds(15), MarkerSource.User).RequireOk());
+            set.ActiveTimeline.AddMarker(TimeSpan.FromSeconds(15), MarkerSource.User).RequireOk()).RequireOk();
 
         var dup = set.DuplicateActive("Copy").RequireOk();
         dup.Active.Name.Should().Be("Copy");
@@ -57,9 +64,18 @@ public class AbridgedVersionSetTests
     }
 
     [Fact]
+    public void ReplaceActiveTimelineRejectsDurationMismatch()
+    {
+        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(60)).RequireOk();
+        var other = Timeline.Create(TimeSpan.FromSeconds(30)).RequireOk();
+        var error = set.ReplaceActiveTimeline(other).RequireError();
+        error.Code.Should().Be("DurationMismatch");
+    }
+
+    [Fact]
     public void CreateVersionRejectsDuplicateNamesCaseInsensitive()
     {
-        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(30));
+        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(30)).RequireOk();
         var error = set.CreateVersionFromScenes("default").RequireError();
         error.Code.Should().Be("DuplicateVersionName");
     }
@@ -67,7 +83,7 @@ public class AbridgedVersionSetTests
     [Fact]
     public void RenameEnforcesUniqueness()
     {
-        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(30));
+        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(30)).RequireOk();
         set = set.CreateVersionFromScenes("Alt").RequireOk();
         var error = set.RenameActive("Default").RequireError();
         error.Code.Should().Be("DuplicateVersionName");
@@ -76,7 +92,7 @@ public class AbridgedVersionSetTests
     [Fact]
     public void RemoveLastVersionFails()
     {
-        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(30));
+        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(30)).RequireOk();
         var error = set.Remove(set.ActiveVersionId).RequireError();
         error.Code.Should().Be("CannotDeleteLastVersion");
     }
@@ -84,7 +100,7 @@ public class AbridgedVersionSetTests
     [Fact]
     public void RemoveActiveSelectsNeighbor()
     {
-        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(30));
+        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(30)).RequireOk();
         var firstId = set.ActiveVersionId;
         set = set.CreateVersionFromScenes("Two").RequireOk();
         var secondId = set.ActiveVersionId;
@@ -99,7 +115,7 @@ public class AbridgedVersionSetTests
     [Fact]
     public void AddSharedSceneMarkerUpdatesAllVersionsWithSameId()
     {
-        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(90));
+        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(90)).RequireOk();
         set = set.CreateVersionFromScenes("B").RequireOk();
         var id = Guid.NewGuid();
         set = set.AddSharedSceneMarker(TimeSpan.FromSeconds(12), id).RequireOk();
@@ -116,7 +132,7 @@ public class AbridgedVersionSetTests
     [Fact]
     public void ReorderMovesVersionAndKeepsActive()
     {
-        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(30));
+        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(30)).RequireOk();
         var firstId = set.ActiveVersionId;
         set = set.CreateVersionFromScenes("Two").RequireOk();
         var secondId = set.ActiveVersionId;
@@ -131,7 +147,7 @@ public class AbridgedVersionSetTests
     [Fact]
     public void ReorderRejectsOutOfRangeIndex()
     {
-        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(30));
+        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(30)).RequireOk();
         var error = set.Reorder(set.ActiveVersionId, 1).RequireError();
         error.Code.Should().Be("InvalidVersionIndex");
     }

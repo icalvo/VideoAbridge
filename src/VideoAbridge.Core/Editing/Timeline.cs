@@ -39,42 +39,46 @@ public sealed class Timeline
 
     public ProjectSettings Settings { get; }
 
-    public static Timeline Create(TimeSpan duration)
+    public static Result<Timeline> Create(TimeSpan duration)
     {
         if (duration <= TimeSpan.Zero)
-            throw new ArgumentOutOfRangeException(nameof(duration), "Duration must be positive.");
+            return Fail<Timeline>("InvalidDuration", "Duration must be positive.");
 
-        return new Timeline(
-            duration,
-            [],
-            [new SegmentState(IsDeleted: false)],
-            [],
-            ProjectSettings.Default);
+        return Ok(Empty(duration));
     }
 
     /// <summary>
     /// Builds a timeline from persisted state without applying stepwise topology rules.
-    /// Factory may throw only for programmer errors (count mismatches); callers should validate first.
     /// </summary>
-    public static Timeline FromPersistedState(
+    public static Result<Timeline> FromPersistedState(
         TimeSpan duration,
         ImmutableList<Marker> markers,
         ImmutableList<bool> segmentDeleted,
         ImmutableList<JoinTransition> joins,
         ProjectSettings settings)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(duration, TimeSpan.Zero);
         ArgumentNullException.ThrowIfNull(markers);
         ArgumentNullException.ThrowIfNull(segmentDeleted);
         ArgumentNullException.ThrowIfNull(joins);
         ArgumentNullException.ThrowIfNull(settings);
+        if (duration <= TimeSpan.Zero)
+            return Fail<Timeline>("InvalidDuration", "Duration must be positive.");
         if (segmentDeleted.Count != markers.Count + 1)
-            throw new ArgumentException("Segment count must equal marker count + 1.");
+            return Fail<Timeline>("InvalidSegmentCount", "Segment count must equal marker count + 1.");
 
         ImmutableList<Marker> orderedMarkers = [.. markers.OrderBy(m => m.Time)];
         ImmutableList<SegmentState> segments = [.. segmentDeleted.Select(d => new SegmentState(d))];
-        return new Timeline(duration, orderedMarkers, segments, joins, settings);
+        return Ok(new Timeline(duration, orderedMarkers, segments, joins, settings));
     }
+
+    /// <summary>Empty kept timeline; caller must ensure <paramref name="duration"/> is positive.</summary>
+    internal static Timeline Empty(TimeSpan duration) =>
+        new(
+            duration,
+            [],
+            [new SegmentState(IsDeleted: false)],
+            [],
+            ProjectSettings.Default);
 
     public ImmutableList<TimeSpan> GetBoundaries() =>
         [TimeSpan.Zero, .. Markers.Select(m => m.Time), Duration];

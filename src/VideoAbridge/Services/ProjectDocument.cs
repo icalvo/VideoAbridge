@@ -87,22 +87,24 @@ internal sealed class ProjectDocument
         ];
 
         var settings = new ProjectSettings(FadeFromBlackSeconds, FadeToBlackSeconds);
-        var timeline = Timeline.FromPersistedState(
-            TimeSpan.FromSeconds(DurationSeconds),
-            markers,
-            [.. SegmentDeleted],
-            joins,
-            settings);
+        return Timeline.FromPersistedState(
+                TimeSpan.FromSeconds(DurationSeconds),
+                markers,
+                [.. SegmentDeleted],
+                joins,
+                settings)
+            .Bind(timeline =>
+            {
+                var interiorCount = timeline.GetDeletedRuns().Count(r => r.IsInterior);
+                if (joins.Count != interiorCount)
+                {
+                    return Fail<(string, Timeline)>(
+                        "InvalidProject",
+                        "Join count does not match interior deleted runs.");
+                }
 
-        var interiorCount = timeline.GetDeletedRuns().Count(r => r.IsInterior);
-        if (joins.Count != interiorCount)
-        {
-            return Fail<(string, Timeline)>(
-                "InvalidProject",
-                "Join count does not match interior deleted runs.");
-        }
-
-        return Ok((VideoPath, timeline));
+                return Ok((VideoPath, timeline));
+            });
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new()

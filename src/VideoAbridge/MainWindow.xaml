@@ -214,7 +214,7 @@
                 <Separator/>
                 <MenuItem Header="E_xport…"
                           Command="{Binding ExportCommand}"
-                          InputGestureText="Ctrl+E"
+                          InputGestureText="Ctrl+S"
                           ToolTip="{Binding ExportToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
             </MenuItem>
@@ -243,38 +243,38 @@
                 <Separator/>
                 <MenuItem Header="Delete Section"
                           Command="{Binding DeleteSectionCommand}"
-                          InputGestureText="Ctrl+D"
+                          InputGestureText="Delete"
                           ToolTip="{Binding DeleteSectionToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
                 <MenuItem Header="Restore Section"
                           Command="{Binding RestoreSectionCommand}"
-                          InputGestureText="Ctrl+Shift+D"
+                          InputGestureText="Shift+Delete"
                           ToolTip="{Binding RestoreSectionToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
                 <MenuItem Header="Delete Section from Start"
                           Command="{Binding DeleteSectionFromStartCommand}"
-                          InputGestureText="Ctrl+Shift+Home"
+                          InputGestureText="Ctrl+Home"
                           ToolTip="{Binding DeleteSectionFromStartToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
                 <MenuItem Header="Delete Section to End"
                           Command="{Binding DeleteSectionToEndCommand}"
-                          InputGestureText="Ctrl+Shift+End"
+                          InputGestureText="Ctrl+End"
                           ToolTip="{Binding DeleteSectionToEndToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
                 <MenuItem Header="Restore Section from Start"
                           Command="{Binding RestoreSectionFromStartCommand}"
-                          InputGestureText="Ctrl+Alt+Home"
+                          InputGestureText="Ctrl+Shift+Home"
                           ToolTip="{Binding RestoreSectionFromStartToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
                 <MenuItem Header="Restore Section to End"
                           Command="{Binding RestoreSectionToEndCommand}"
-                          InputGestureText="Ctrl+Alt+End"
+                          InputGestureText="Ctrl+Shift+End"
                           ToolTip="{Binding RestoreSectionToEndToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
                 <Separator/>
                 <MenuItem Header="Detect Scenes"
                           Command="{Binding DetectScenesCommand}"
-                          InputGestureText="Ctrl+Shift+S"
+                          InputGestureText="Ctrl+D"
                           ToolTip="{Binding DetectScenesToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
             </MenuItem>
@@ -314,6 +314,13 @@
                           InputGestureText="F2"
                           ToolTip="{Binding RenameVersionToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
+                <Separator/>
+                <MenuItem Header="_Next Version"
+                          Command="{Binding SelectNextVersionCommand}"
+                          InputGestureText="Ctrl+Tab"/>
+                <MenuItem Header="_Previous Version"
+                          Command="{Binding SelectPreviousVersionCommand}"
+                          InputGestureText="Ctrl+Shift+Tab"/>
             </MenuItem>
         </Menu>
 
@@ -591,7 +598,7 @@
                                 IsHitTestVisible="False"
                                 Cursor="Hand"
                                 Command="{Binding PlayPauseCommand}"
-                                ToolTip="Play / Pause"
+                                ToolTip="Play / Pause (P)"
                                 Background="Transparent"
                                 BorderThickness="0"
                                 Focusable="False">
@@ -630,23 +637,12 @@
             <Border Grid.Row="0" Grid.Column="2" Background="#333337" Margin="8,0,0,0" Padding="12">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
-                        <StackPanel Margin="0,0,0,16"
-                                    Visibility="{Binding HasSelectedJoin, Converter={StaticResource BoolToVis}}">
-                            <TextBlock Text="Crossfade (s)" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
-                            <TextBlock Foreground="#AAA" TextWrapping="Wrap" Margin="0,0,0,8"
-                                       Text="0 = hard cut. Click a Cut/XF on the timeline to select it."/>
-                            <TextBox Text="{Binding SelectedCrossfadeSeconds, UpdateSourceTrigger=LostFocus}"
-                                     Margin="0,0,0,4"
-                                     KeyDown="DurationTextBox_KeyDown"/>
-                            <TextBlock Foreground="#AAA"
-                                       Text="{Binding SelectedCrossfadeCap, StringFormat=Max: {0:0.###}s}"/>
-                        </StackPanel>
-
                         <TextBlock Text="Start fade from black (s)" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
                         <TextBox x:Name="StartFadeTextBox"
                                  Text="{Binding FadeFromBlackSeconds, UpdateSourceTrigger=LostFocus}"
                                  Margin="0,0,0,4"
-                                 KeyDown="DurationTextBox_KeyDown"/>
+                                 KeyDown="DurationTextBox_KeyDown"
+                                 LostFocus="SidebarDurationTextBox_LostFocus"/>
                         <TextBlock Foreground="#AAA" Margin="0,0,0,16"
                                    Text="{Binding StartFadeCap, StringFormat=Max: {0:0.###}s}"/>
 
@@ -654,9 +650,22 @@
                         <TextBox x:Name="EndFadeTextBox"
                                  Text="{Binding FadeToBlackSeconds, UpdateSourceTrigger=LostFocus}"
                                  Margin="0,0,0,4"
-                                 KeyDown="DurationTextBox_KeyDown"/>
-                        <TextBlock Foreground="#AAA"
+                                 KeyDown="DurationTextBox_KeyDown"
+                                 LostFocus="SidebarDurationTextBox_LostFocus"/>
+                        <TextBlock Foreground="#AAA" Margin="0,0,0,16"
                                    Text="{Binding EndFadeCap, StringFormat=Max: {0:0.###}s}"/>
+
+                        <StackPanel Visibility="{Binding HasSelectedJoin, Converter={StaticResource BoolToVis}}">
+                            <TextBlock Text="Crossfade (s)" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
+                            <TextBlock Foreground="#AAA" TextWrapping="Wrap" Margin="0,0,0,8"
+                                       Text="0 = hard cut. Click a Cut/XF on the timeline to select it."/>
+                            <TextBox Text="{Binding SelectedCrossfadeSeconds, UpdateSourceTrigger=LostFocus}"
+                                     Margin="0,0,0,4"
+                                     KeyDown="DurationTextBox_KeyDown"
+                                     LostFocus="SidebarDurationTextBox_LostFocus"/>
+                            <TextBlock Foreground="#AAA"
+                                       Text="{Binding SelectedCrossfadeCap, StringFormat=Max: {0:0.###}s}"/>
+                        </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
             </Border>
@@ -725,7 +734,9 @@
                                       MaxPixelsPerSecond="{Binding MaxPixelsPerSecond, Mode=TwoWay}"
                                       MarkerThumbs="{Binding MarkerThumbs}"
                                       SelectedMarkerIds="{Binding SelectedMarkerIds}"
-                                      SelectedDeletedRunId="{Binding SelectedDeletedRunId, Mode=TwoWay}"/>
+                                      SelectedDeletedRunId="{Binding SelectedDeletedRunId, Mode=TwoWay}"
+                                      TimelineFocusKind="{Binding TimelineFocusKind}"
+                                      FocusedTimelineItemId="{Binding FocusedTimelineItemId}"/>
         </Grid>
     </DockPanel>
 </Window>

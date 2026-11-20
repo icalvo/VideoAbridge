@@ -44,6 +44,8 @@ public sealed class ThumbnailExtractor
         }
 
         var output = GetCachePath(videoPath, seek, side, duration);
+        if (output is null)
+            return null;
         if (File.Exists(output))
             return output;
 
@@ -70,11 +72,15 @@ public sealed class ThumbnailExtractor
     /// Stable on-disk path keyed by file-content fingerprint + seek time + side
     /// (under %LocalAppData%\VideoAbridge\ThumbCache).
     /// </summary>
-    public string GetCachePath(string videoPath, TimeSpan seek, ThumbnailSide side, TimeSpan duration)
+    public string? GetCachePath(string videoPath, TimeSpan seek, ThumbnailSide side, TimeSpan duration)
     {
         var fullPath = Path.GetFullPath(videoPath);
-        var videoKey = FileContentId.Compute(fullPath, duration);
-        var fileName = $"{(long)Math.Round(seek.TotalMilliseconds)}_{side}.jpg";
-        return Path.Combine(_cacheDirectory, videoKey, fileName);
+        return FileContentId.Compute(fullPath, duration).Match<string?>(
+            videoKey =>
+            {
+                var fileName = $"{(long)Math.Round(seek.TotalMilliseconds)}_{side}.jpg";
+                return Path.Combine(_cacheDirectory, videoKey, fileName);
+            },
+            _ => null);
     }
 }

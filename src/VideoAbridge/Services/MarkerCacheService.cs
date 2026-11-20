@@ -35,10 +35,10 @@ internal sealed class MarkerCacheService
     public MarkerCacheEntry? TryLoad(string videoPath, TimeSpan duration)
     {
         var fullPath = Path.GetFullPath(videoPath);
-        string fileHash;
+        string? fileHash;
         try
         {
-            fileHash = FileContentId.Compute(fullPath, duration);
+            fileHash = FileContentId.Compute(fullPath, duration).Match<string?>(hash => hash, _ => null);
         }
         catch (IOException)
         {
@@ -48,6 +48,9 @@ internal sealed class MarkerCacheService
         {
             return null;
         }
+
+        if (fileHash is null)
+            return null;
 
         var file = GetCacheFilePath(fileHash);
         if (!File.Exists(file))
@@ -100,8 +103,9 @@ internal sealed class MarkerCacheService
         ArgumentNullException.ThrowIfNull(versionSet);
 
         var fullPath = Path.GetFullPath(videoPath);
-        var fileHash = FileContentId.Compute(fullPath, versionSet.Duration);
-        Save(ToEntry(fileHash, versionSet, uiState));
+        FileContentId.Compute(fullPath, versionSet.Duration).Match(
+            fileHash => Save(ToEntry(fileHash, versionSet, uiState)),
+            _ => { });
     }
 
     public AbridgedVersionSet? TryLoadVersionSet(string videoPath, TimeSpan duration)
@@ -216,7 +220,8 @@ internal sealed class MarkerCacheService
         if (lastScene > scenePos)
             scenePos = lastScene;
 
-        return AbridgedVersionSet.FromPersisted(probedDuration, scenePos, activeId, versions);
+        return AbridgedVersionSet.FromPersisted(probedDuration, scenePos, activeId, versions)
+            .Match<AbridgedVersionSet?>(set => set, _ => null);
     }
 
     private static Timeline? RestoreVersionTimeline(VersionCacheDto dto, TimeSpan probedDuration)

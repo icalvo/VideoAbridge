@@ -15,20 +15,20 @@ public static class FileContentId
     /// Duration is folded in as rounded milliseconds from <see cref="TimeSpan.TotalSeconds"/> so migration
     /// from cached <c>durationSeconds</c> matches later loads that pass a probed <see cref="TimeSpan"/>.
     /// </summary>
-    public static string Compute(string filePath, TimeSpan duration) =>
+    public static Result<string> Compute(string filePath, TimeSpan duration) =>
         Compute(filePath, duration.TotalSeconds);
 
     /// <summary>
     /// Same as <see cref="Compute(string, TimeSpan)"/> using a duration in seconds (e.g. cache JSON).
     /// </summary>
-    public static string Compute(string filePath, double durationSeconds)
+    public static Result<string> Compute(string filePath, double durationSeconds)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
 
         var fullPath = Path.GetFullPath(filePath);
         var info = new FileInfo(fullPath);
         if (!info.Exists)
-            throw new FileNotFoundException("Video file was not found.", fullPath);
+            return Fail<string>("FileNotFound", "Video file was not found.");
 
         var length = info.Length;
         var hash = new XxHash128();
@@ -57,7 +57,7 @@ public static class FileContentId
         BinaryPrimitives.WriteInt64LittleEndian(meta, DurationKeyMilliseconds(durationSeconds));
         hash.Append(meta);
 
-        return Convert.ToHexString(hash.GetHashAndReset()).ToUpperInvariant();
+        return Ok(Convert.ToHexString(hash.GetHashAndReset()).ToUpperInvariant());
     }
 
     public static long DurationKeyMilliseconds(double durationSeconds) =>

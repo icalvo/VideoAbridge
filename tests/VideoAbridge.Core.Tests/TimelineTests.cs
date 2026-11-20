@@ -6,7 +6,7 @@ public class TimelineTests
 {
     private static Timeline CreateWithMarkers(params double[] seconds)
     {
-        var timeline = Timeline.Create(TimeSpan.FromSeconds(100));
+        var timeline = Timeline.Create(TimeSpan.FromSeconds(100)).RequireOk();
         foreach (var s in seconds)
             timeline = timeline.AddMarker(TimeSpan.FromSeconds(s), MarkerSource.User).RequireOk();
 
@@ -16,10 +16,17 @@ public class TimelineTests
     [Fact]
     public void CreateHasSingleKeptSegment()
     {
-        var timeline = Timeline.Create(TimeSpan.FromSeconds(60));
+        var timeline = Timeline.Create(TimeSpan.FromSeconds(60)).RequireOk();
         timeline.Segments.Should().ContainSingle().Which.IsDeleted.Should().BeFalse();
         timeline.Markers.Should().BeEmpty();
         timeline.Joins.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void CreateRejectsNonPositiveDuration()
+    {
+        var error = Timeline.Create(TimeSpan.Zero).RequireError();
+        error.Code.Should().Be("InvalidDuration");
     }
 
     [Fact]
@@ -234,7 +241,7 @@ public class TimelineTests
     [Fact]
     public void OperationsDoNotThrowOnInvalidInput()
     {
-        var timeline = Timeline.Create(TimeSpan.FromSeconds(10));
+        var timeline = Timeline.Create(TimeSpan.FromSeconds(10)).RequireOk();
         var act = () => timeline.RemoveMarker(Guid.NewGuid());
         act.Should().NotThrow();
         act().RequireError();

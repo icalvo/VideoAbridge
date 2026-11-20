@@ -11,8 +11,8 @@ public class FileContentIdTests
         var path = dir.WriteFile("a.bin", CreateBytes(length: 100));
         var duration = TimeSpan.FromSeconds(12.5);
 
-        var first = FileContentId.Compute(path, duration);
-        var second = FileContentId.Compute(path, duration);
+        var first = FileContentId.Compute(path, duration).RequireOk();
+        var second = FileContentId.Compute(path, duration).RequireOk();
 
         first.Should().Be(second);
         first.Should().HaveLength(32);
@@ -25,8 +25,8 @@ public class FileContentIdTests
         using var dir = new TempDir();
         var path = dir.WriteFile("a.bin", CreateBytes(length: 100));
 
-        var a = FileContentId.Compute(path, TimeSpan.FromSeconds(10));
-        var b = FileContentId.Compute(path, TimeSpan.FromSeconds(11));
+        var a = FileContentId.Compute(path, TimeSpan.FromSeconds(10)).RequireOk();
+        var b = FileContentId.Compute(path, TimeSpan.FromSeconds(11)).RequireOk();
 
         a.Should().NotBe(b);
     }
@@ -39,7 +39,8 @@ public class FileContentIdTests
         var pathB = dir.WriteFile("b.bin", CreateBytes(length: 100, seed: 2));
         var duration = TimeSpan.FromSeconds(5);
 
-        FileContentId.Compute(pathA, duration).Should().NotBe(FileContentId.Compute(pathB, duration));
+        FileContentId.Compute(pathA, duration).RequireOk()
+            .Should().NotBe(FileContentId.Compute(pathB, duration).RequireOk());
     }
 
     [Fact]
@@ -50,7 +51,8 @@ public class FileContentIdTests
         var pathB = dir.WriteFile("b.bin", CreateBytes(length: 101));
         var duration = TimeSpan.FromSeconds(5);
 
-        FileContentId.Compute(pathA, duration).Should().NotBe(FileContentId.Compute(pathB, duration));
+        FileContentId.Compute(pathA, duration).RequireOk()
+            .Should().NotBe(FileContentId.Compute(pathB, duration).RequireOk());
     }
 
     [Fact]
@@ -58,7 +60,7 @@ public class FileContentIdTests
     {
         using var dir = new TempDir();
         var path = dir.WriteFile("small.bin", CreateBytes(length: 64));
-        var id = FileContentId.Compute(path, TimeSpan.FromSeconds(1));
+        var id = FileContentId.Compute(path, TimeSpan.FromSeconds(1)).RequireOk();
         id.Should().HaveLength(32);
     }
 
@@ -70,8 +72,8 @@ public class FileContentIdTests
         var path = dir.WriteFile("mid.bin", CreateBytes(length));
         var duration = TimeSpan.FromMinutes(3);
 
-        var first = FileContentId.Compute(path, duration);
-        var second = FileContentId.Compute(path, duration);
+        var first = FileContentId.Compute(path, duration).RequireOk();
+        var second = FileContentId.Compute(path, duration).RequireOk();
         first.Should().Be(second);
     }
 
@@ -84,17 +86,26 @@ public class FileContentIdTests
         var path = dir.WriteFile("large.bin", bytes);
         var duration = TimeSpan.FromSeconds(90);
 
-        var baseline = FileContentId.Compute(path, duration);
+        var baseline = FileContentId.Compute(path, duration).RequireOk();
 
         // Mutate only the middle (outside head/tail samples) — identity must stay the same.
         bytes[FileContentId.SampleSizeBytes + 50] ^= 0xFF;
         File.WriteAllBytes(path, bytes);
-        FileContentId.Compute(path, duration).Should().Be(baseline);
+        FileContentId.Compute(path, duration).RequireOk().Should().Be(baseline);
 
         // Mutate the tail sample — identity must change.
         bytes[^1] ^= 0xFF;
         File.WriteAllBytes(path, bytes);
-        FileContentId.Compute(path, duration).Should().NotBe(baseline);
+        FileContentId.Compute(path, duration).RequireOk().Should().NotBe(baseline);
+    }
+
+    [Fact]
+    public void ComputeMissingFileReturnsFileNotFound()
+    {
+        using var dir = new TempDir();
+        var path = Path.Combine(dir.Path, "missing.bin");
+        var error = FileContentId.Compute(path, TimeSpan.FromSeconds(1)).RequireError();
+        error.Code.Should().Be("FileNotFound");
     }
 
     private static byte[] CreateBytes(int length, byte seed = 0)

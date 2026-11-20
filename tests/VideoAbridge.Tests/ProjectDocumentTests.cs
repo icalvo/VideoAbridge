@@ -8,7 +8,7 @@ public class ProjectDocumentTests
     [Fact]
     public void RoundTripsJoinsAndEndFade()
     {
-        var timeline = Timeline.Create(TimeSpan.FromSeconds(100));
+        var timeline = Timeline.Create(TimeSpan.FromSeconds(100)).RequireOk();
         timeline = timeline.AddMarker(TimeSpan.FromSeconds(10), MarkerSource.User).RequireOk();
         timeline = timeline.AddMarker(TimeSpan.FromSeconds(20), MarkerSource.User).RequireOk();
         timeline = timeline.AddMarker(TimeSpan.FromSeconds(30), MarkerSource.User).RequireOk();
@@ -28,7 +28,7 @@ public class ProjectDocumentTests
     [Fact]
     public void RoundTripsStartFade()
     {
-        var timeline = Timeline.Create(TimeSpan.FromSeconds(100));
+        var timeline = Timeline.Create(TimeSpan.FromSeconds(100)).RequireOk();
         timeline = timeline.AddMarker(TimeSpan.FromSeconds(10), MarkerSource.User).RequireOk();
         timeline = timeline.AddMarker(TimeSpan.FromSeconds(20), MarkerSource.User).RequireOk();
         timeline = timeline.AddMarker(TimeSpan.FromSeconds(30), MarkerSource.User).RequireOk();

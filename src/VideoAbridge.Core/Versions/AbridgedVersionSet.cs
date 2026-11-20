@@ -15,13 +15,6 @@ public sealed class AbridgedVersionSet
         Guid activeVersionId,
         ImmutableList<AbridgedVersion> versions)
     {
-        if (duration <= TimeSpan.Zero)
-            throw new ArgumentOutOfRangeException(nameof(duration), "Duration must be positive.");
-        if (versions.Count == 0)
-            throw new ArgumentException("At least one version is required.", nameof(versions));
-        if (versions.All(v => v.Id != activeVersionId))
-            throw new ArgumentException("Active version was not found.", nameof(activeVersionId));
-
         Duration = duration;
         SceneDetectPosition = sceneDetectPosition < TimeSpan.Zero ? TimeSpan.Zero : sceneDetectPosition;
         ActiveVersionId = activeVersionId;
@@ -38,38 +31,46 @@ public sealed class AbridgedVersionSet
 
     public Timeline ActiveTimeline => Active.Timeline;
 
-    public static AbridgedVersionSet CreateDefault(TimeSpan duration)
-    {
-        var id = Guid.NewGuid();
-        var version = new AbridgedVersion(id, DefaultVersionName, Timeline.Create(duration));
-        return new AbridgedVersionSet(duration, TimeSpan.Zero, id, [version]);
-    }
+    public static Result<AbridgedVersionSet> CreateDefault(TimeSpan duration) =>
+        Timeline.Create(duration).Map(timeline =>
+        {
+            var id = Guid.NewGuid();
+            var version = new AbridgedVersion(id, DefaultVersionName, timeline);
+            return new AbridgedVersionSet(duration, TimeSpan.Zero, id, [version]);
+        });
 
-    public static AbridgedVersionSet FromPersisted(
+    public static Result<AbridgedVersionSet> FromPersisted(
         TimeSpan duration,
         TimeSpan sceneDetectPosition,
         Guid activeVersionId,
         ImmutableList<AbridgedVersion> versions)
     {
         ArgumentNullException.ThrowIfNull(versions);
-        return new AbridgedVersionSet(duration, sceneDetectPosition, activeVersionId, versions);
+        if (duration <= TimeSpan.Zero)
+            return Fail<AbridgedVersionSet>("InvalidDuration", "Duration must be positive.");
+        if (versions.Count == 0)
+            return Fail<AbridgedVersionSet>("VersionsRequired", "At least one version is required.");
+        if (versions.All(v => v.Id != activeVersionId))
+            return Fail<AbridgedVersionSet>("VersionNotFound", "Active version was not found.");
+
+        return Ok(new AbridgedVersionSet(duration, sceneDetectPosition, activeVersionId, versions));
     }
 
     public AbridgedVersionSet WithSceneDetectPosition(TimeSpan position) =>
         new(Duration, position, ActiveVersionId, Versions);
 
-    public AbridgedVersionSet ReplaceActiveTimeline(Timeline timeline)
+    public Result<AbridgedVersionSet> ReplaceActiveTimeline(Timeline timeline)
     {
         ArgumentNullException.ThrowIfNull(timeline);
         if (timeline.Duration != Duration)
-            throw new ArgumentException("Timeline duration must match the version set.", nameof(timeline));
+            return Fail<AbridgedVersionSet>("DurationMismatch", "Timeline duration must match the version set.");
 
         ImmutableList<AbridgedVersion> updated =
         [
             .. Versions.Select(v =>
                 v.Id == ActiveVersionId ? v.WithTimeline(timeline) : v)
         ];
-        return new AbridgedVersionSet(Duration, SceneDetectPosition, ActiveVersionId, updated);
+        return Ok(new AbridgedVersionSet(Duration, SceneDetectPosition, ActiveVersionId, updated));
     }
 
     public Result<AbridgedVersionSet> SetActive(Guid versionId)
@@ -197,7 +198,7 @@ public sealed class AbridgedVersionSet
 
     private Timeline BuildScenesOnlyTimeline() =>
         GetSharedSceneMarkers().Aggregate(
-            Timeline.Create(Duration),
+            Timeline.Empty(Duration),
             (timeline, scene) =>
                 timeline.AddMarker(scene.Time, MarkerSource.SceneDetect, scene.Id)
                     .Match(next => next, _ => timeline));

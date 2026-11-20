@@ -49,20 +49,23 @@ Shortcuts are ignored while typing in a text box.
 | Shortcut              | Action                                    |
 | --------------------- | ----------------------------------------- |
 | Ctrl+O                | Open Video                                |
-| Ctrl+E                | Export                                    |
-| Space                 | Play / Pause                              |
+| Ctrl+S                | Export                                    |
+| P                     | Play / Pause                              |
 | Home                  | Go to Beginning                           |
 | Ctrl+Z / Ctrl+Y       | Undo / Redo                               |
 | M                     | Add Marker                                |
-| Delete                | Delete Marker                             |
-| Ctrl+D                | Delete Section                            |
-| Ctrl+Shift+D          | Restore Section                           |
-| Ctrl+Shift+Home / End | Delete Section from Start / to End        |
-| Ctrl+Alt+Home / End   | Restore Section from Start / to End       |
-| Ctrl+Shift+S          | Detect Scenes                             |
+| Delete                | Delete Marker / Delete Section            |
+| Shift+Delete          | Restore Section                           |
+| Ctrl+Home / End       | Delete Section from Start / to End        |
+| Ctrl+Shift+Home / End | Restore Section from Start / to End       |
+| Ctrl+D                | Detect Scenes                             |
 | Tab                   | Toggle Edit / Preview                     |
+| Left / Right          | Focus previous / next marker or cut (Edit)|
+| Up / Down             | Focus nearest item in the other lane (Edit)|
+| Space / Shift+Space   | Click / Shift-click focused item (Edit)   |
 | Ctrl+1 / Ctrl+0       | Zoom to abridged content / Zoom to fit    |
 | Ctrl+N / Ctrl+Shift+N | New / Duplicate Version                   |
+| Ctrl+Tab / Ctrl+Shift+Tab | Next / Previous Version               |
 | F2                    | Rename Version (inline on the active tab) |
 | Ctrl+Shift+T          | Expand / collapse Tasks pane              |
 

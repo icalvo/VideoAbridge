@@ -69,10 +69,29 @@ public partial class TimelineControl : UserControl
         DependencyProperty.Register(nameof(PreviewTimeMap), typeof(PreviewTimeMap), typeof(TimelineControl),
             new PropertyMetadata(null, OnVisualPropertyChanged));
 
+    public static readonly DependencyProperty TimelineFocusKindProperty =
+        DependencyProperty.Register(nameof(TimelineFocusKind), typeof(TimelineFocusKind), typeof(TimelineControl),
+            new PropertyMetadata(TimelineFocusKind.None, OnFocusItemChanged));
+
+    public static readonly DependencyProperty FocusedTimelineItemIdProperty =
+        DependencyProperty.Register(nameof(FocusedTimelineItemId), typeof(Guid?), typeof(TimelineControl),
+            new PropertyMetadata(null, OnFocusItemChanged));
+
+    public static readonly DependencyProperty IsTimelineKeyboardFocusedProperty =
+        DependencyProperty.Register(nameof(IsTimelineKeyboardFocused), typeof(bool), typeof(TimelineControl),
+            new PropertyMetadata(false, OnVisualPropertyChanged));
+
     public const double MinOverlayPixels = 6;
+
+    /// <summary>Scroll margin so the focus triangle clears the viewport edge when scroll room exists.</summary>
+    private const double FocusVisibilityPad = 8;
+    private const double FocusTriangleHalfWidth = 5;
+    private const double FocusTriangleHeight = 7;
 
     private static readonly Brush WaveformBrush = CreateFrozenBrush(0x99, 0x00, 0x00, 0x00);
     private static readonly Brush KeepDurationLabelBrush = CreateFrozenBrush(0x9A, 0x9A, 0x9E);
+    private static readonly Brush FocusTriangleBrightBrush = CreateFrozenBrush(0xFF, 0x33, 0x33);
+    private static readonly Brush FocusTriangleDimBrush = CreateFrozenBrush(0x66, 0x14, 0x14);
 
     private Line? _playheadLine;
     private TimeSpan _fittedDuration = TimeSpan.Zero;
@@ -92,10 +111,13 @@ public partial class TimelineControl : UserControl
         };
         SizeChanged += OnControlSizeChanged;
         Scroller.ScrollChanged += (_, _) => TimelineViewChanged?.Invoke(this, EventArgs.Empty);
+        IsKeyboardFocusWithinChanged += (_, _) =>
+            IsTimelineKeyboardFocused = IsKeyboardFocusWithin;
         Loaded += (_, _) =>
         {
             UpdateZoomBounds(forceFit: Timeline is not null);
             _lastViewportWidth = GetViewportWidth();
+            IsTimelineKeyboardFocused = IsKeyboardFocusWithin;
         };
     }
 
@@ -114,6 +136,47 @@ public partial class TimelineControl : UserControl
         var pps = Math.Max(MinPixelsPerSecond, PixelsPerSecond);
         UpdateLayout();
         Scroller.ScrollToHorizontalOffset(Math.Max(0, startSeconds * pps));
+    }
+
+    /// <summary>
+    /// Scroll horizontally just enough so the focus triangle is in the viewport when scroll room allows.
+    /// At the true timeline start/end the triangle may clip; no extra canvas pad is added.
+    /// </summary>
+    public void EnsureFocusedItemVisible()
+    {
+        if (IsPreviewMode || Timeline is null || FocusedTimelineItemId is not Guid id)
+            return;
+
+        var pps = Math.Max(MinPixelsPerSecond, PixelsPerSecond);
+        double? centerX = TimelineFocusKind switch
+        {
+            TimelineFocusKind.Marker => Timeline.Markers.FirstOrDefault(m => m.Id == id) is { } marker
+                ? marker.Time.TotalSeconds * pps
+                : null,
+            TimelineFocusKind.DeletedRun => Timeline.GetDeletedRuns().FirstOrDefault(r => r.Id == id) is { } run
+                ? (run.Range.Start.TotalSeconds + run.Range.End.TotalSeconds) / 2.0 * pps
+                : null,
+            _ => null,
+        };
+
+        if (centerX is not { } x)
+            return;
+
+        var viewport = GetViewportWidth();
+        if (viewport <= 1)
+            return;
+
+        var canvasWidth = RootCanvas.Width > 1
+            ? RootCanvas.Width
+            : Timeline.Duration.TotalSeconds * pps;
+        var maxOffset = Math.Max(0, canvasWidth - viewport);
+        var left = Scroller.HorizontalOffset;
+        var right = left + viewport;
+
+        if (x - FocusVisibilityPad < left)
+            Scroller.ScrollToHorizontalOffset(Math.Clamp(x - FocusVisibilityPad, 0, maxOffset));
+        else if (x + FocusVisibilityPad > right)
+            Scroller.ScrollToHorizontalOffset(Math.Clamp(x + FocusVisibilityPad - viewport, 0, maxOffset));
     }
 
     public Timeline? Timeline
@@ -194,6 +257,24 @@ public partial class TimelineControl : UserControl
         set => SetValue(PreviewTimeMapProperty, value);
     }
 
+    public TimelineFocusKind TimelineFocusKind
+    {
+        get => (TimelineFocusKind)GetValue(TimelineFocusKindProperty);
+        set => SetValue(TimelineFocusKindProperty, value);
+    }
+
+    public Guid? FocusedTimelineItemId
+    {
+        get => (Guid?)GetValue(FocusedTimelineItemIdProperty);
+        set => SetValue(FocusedTimelineItemIdProperty, value);
+    }
+
+    public bool IsTimelineKeyboardFocused
+    {
+        get => (bool)GetValue(IsTimelineKeyboardFocusedProperty);
+        set => SetValue(IsTimelineKeyboardFocusedProperty, value);
+    }
+
     public event EventHandler<TimeSpanEventArgs>? SeekRequested;
     public event EventHandler<GuidEventArgs>? MarkerClicked;
     public event EventHandler<GuidEventArgs>? DeletedRunSelected;
@@ -213,6 +294,13 @@ public partial class TimelineControl : UserControl
 
     private static void OnVisualPropertyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) =>
         ((TimelineControl)d).Redraw();
+
+    private static void OnFocusItemChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        var control = (TimelineControl)d;
+        control.Redraw();
+        control.EnsureFocusedItemVisible();
+    }
 
     private static void OnPreviewModeChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
@@ -665,11 +753,18 @@ public partial class TimelineControl : UserControl
             Canvas.SetTop(label, trackTop + trackHeight + 4);
             label.MouseLeftButtonDown += (_, e) =>
             {
+                Focus();
                 DeletedRunSelected?.Invoke(this, new GuidEventArgs(run.Id));
                 SelectedDeletedRunId = run.Id;
                 e.Handled = true;
             };
             RootCanvas.Children.Add(label);
+
+            if (TimelineFocusKind == TimelineFocusKind.DeletedRun
+                && FocusedTimelineItemId == run.Id)
+            {
+                AddFocusTriangle(mid, trackTop + trackHeight + 18);
+            }
 
             if (SelectedDeletedRunId == run.Id)
             {
@@ -731,6 +826,7 @@ public partial class TimelineControl : UserControl
             };
             line.MouseLeftButtonDown += (_, e) =>
             {
+                Focus();
                 MarkerClicked?.Invoke(this, new GuidEventArgs(marker.Id));
                 e.Handled = true;
             };
@@ -748,10 +844,17 @@ public partial class TimelineControl : UserControl
             Canvas.SetTop(handle, trackTop + trackHeight - 5);
             handle.MouseLeftButtonDown += (_, e) =>
             {
+                Focus();
                 MarkerClicked?.Invoke(this, new GuidEventArgs(marker.Id));
                 e.Handled = true;
             };
             RootCanvas.Children.Add(handle);
+
+            if (TimelineFocusKind == TimelineFocusKind.Marker
+                && FocusedTimelineItemId == marker.Id)
+            {
+                AddFocusTriangle(x, trackTop + trackHeight + 6);
+            }
         }
 
         _playheadLine = new Line
@@ -1009,6 +1112,24 @@ public partial class TimelineControl : UserControl
         RootCanvas.Children.Add(border);
     }
 
+    /// <summary>Small upward-pointing triangle; <paramref name="top"/> is the tip Y.</summary>
+    private void AddFocusTriangle(double centerX, double top)
+    {
+        var brush = IsTimelineKeyboardFocused ? FocusTriangleBrightBrush : FocusTriangleDimBrush;
+        var triangle = new Polygon
+        {
+            Points =
+            [
+                new Point(centerX, top),
+                new Point(centerX - FocusTriangleHalfWidth, top + FocusTriangleHeight),
+                new Point(centerX + FocusTriangleHalfWidth, top + FocusTriangleHeight),
+            ],
+            Fill = brush,
+            IsHitTestVisible = false,
+        };
+        RootCanvas.Children.Add(triangle);
+    }
+
     private void UpdatePlayhead()
     {
         if (_playheadLine is null)
@@ -1058,6 +1179,8 @@ public partial class TimelineControl : UserControl
 
     private void OnCanvasMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        Focus();
+
         var duration = DisplayDuration;
         if (duration <= TimeSpan.Zero)
             return;

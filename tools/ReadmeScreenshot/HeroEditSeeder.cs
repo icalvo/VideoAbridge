@@ -14,14 +14,15 @@ internal static class HeroEditSeeder
                 $"Sample video must be at least 8 seconds (got {duration.TotalSeconds:0.###}s).");
         }
 
-        var timeline = Timeline.Create(duration);
+        var timeline = RequireOk(Timeline.Create(duration));
         timeline = RequireOk(timeline.AddMarker(TimeSpan.FromSeconds(2), MarkerSource.User));
         timeline = RequireOk(timeline.AddMarker(TimeSpan.FromSeconds(4), MarkerSource.User));
         timeline = RequireOk(timeline.AddMarker(TimeSpan.FromSeconds(6), MarkerSource.User));
         timeline = RequireOk(timeline.AddMarker(TimeSpan.FromSeconds(8), MarkerSource.User));
         timeline = RequireOk(timeline.DeleteBetween(timeline.Markers[1].Id, timeline.Markers[2].Id));
 
-        var set = AbridgedVersionSet.CreateDefault(duration).ReplaceActiveTimeline(timeline);
+        var set = RequireOk(
+            RequireOk(AbridgedVersionSet.CreateDefault(duration)).ReplaceActiveTimeline(timeline));
         var cache = new MarkerCacheService(cacheDirectory);
         cache.SaveVersionSet(videoPath, set);
     }

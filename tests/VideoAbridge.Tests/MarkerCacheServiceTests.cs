@@ -15,10 +15,10 @@ public class MarkerCacheServiceTests
         var duration = TimeSpan.FromSeconds(42);
         var cache = new MarkerCacheService(Path.Combine(dir.Path, "MarkerCache"));
 
-        var set = AbridgedVersionSet.CreateDefault(duration);
+        var set = AbridgedVersionSet.CreateDefault(duration).RequireOk();
         set = set.ReplaceActiveTimeline(
-            set.ActiveTimeline.AddMarker(TimeSpan.FromSeconds(10), MarkerSource.User).RequireOk());
-        set = set.ReplaceActiveTimeline(set.ActiveTimeline.SetStartFade(1.25).RequireOk());
+            set.ActiveTimeline.AddMarker(TimeSpan.FromSeconds(10), MarkerSource.User).RequireOk()).RequireOk();
+        set = set.ReplaceActiveTimeline(set.ActiveTimeline.SetStartFade(1.25).RequireOk()).RequireOk();
         set = set.WithSceneDetectPosition(TimeSpan.FromSeconds(15));
         set = set.CreateVersionFromScenes("Alt").RequireOk();
         cache.SaveVersionSet(
@@ -94,7 +94,7 @@ public class MarkerCacheServiceTests
         using var dir = new TempDir();
         var video = dir.WriteFile("clip.bin", CreateBytes(200));
         var cache = new MarkerCacheService(Path.Combine(dir.Path, "MarkerCache"));
-        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(42));
+        var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(42)).RequireOk();
         cache.SaveVersionSet(video, set);
 
         cache.TryLoadVersionSet(video, TimeSpan.FromSeconds(43)).Should().BeNull();
@@ -108,7 +108,7 @@ public class MarkerCacheServiceTests
         var duration = TimeSpan.FromSeconds(42);
         var cache = new MarkerCacheService(Path.Combine(dir.Path, "MarkerCache"));
 
-        var set = AbridgedVersionSet.CreateDefault(duration);
+        var set = AbridgedVersionSet.CreateDefault(duration).RequireOk();
         set = set.CreateVersionFromScenes("Two").RequireOk();
         set = set.CreateVersionFromScenes("Three").RequireOk();
         var lastId = set.ActiveVersionId;

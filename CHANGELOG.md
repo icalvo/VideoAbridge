@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2026.11.6] - 2026-11-20
+
+### Added
+
+- Edit-mode timeline keyboard focus: Left/Right within markers or deleted sections, Up/Down to the other lane (nearest in time), Space/Shift+Space as click/Shift-click; red focus triangle (bright when timeline focused, dim when blurred); timeline scrolls just enough to keep the triangle in view when scroll room allows (may clip at the true ends).
+- Ctrl+Tab / Ctrl+Shift+Tab cycle to the next / previous version (wraps).
+
+### Changed
+
+- Core domain validation (`Timeline` / `AbridgedVersionSet` factories, `FileContentId.Compute`) returns `Result` instead of throwing (null-argument checks unchanged).
+- Preview side panel lists start/end fade controls above the selected Cut/XF crossfade controls.
+- Marker click selection: plain click replaces a single selection; with two selected, Shift+click on another marker always swaps out the nearest (including markers between them).
+- Keyboard shortcuts: Export Ctrl+S; Delete / Shift+Delete for delete/restore section (Delete still deletes a single marker); Detect Scenes Ctrl+D; Ctrl+Home/End delete from start/to end; Ctrl+Shift+Home/End restore from start/to end; Play/Pause is P (Space activates timeline focus in Edit).
+
 ## [2026.11.5] - 2026-11-20
 
 ### Added
@@ -67,7 +81,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial GitHub Release of VideoAbridge: open a single finished video, mark and delete sections, scene detection, multiple abridged versions, Edit/Preview modes, joins/fades, undo/redo, marker cache, and FFmpeg export.
 - CI release workflow publishing a self-contained Windows x64 build zip.
 
-[Unreleased]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.5...HEAD
+[Unreleased]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.6...HEAD
+[2026.11.6]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.5...v2026.11.6
 [2026.11.5]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.4...v2026.11.5
 [2026.11.4]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.3...v2026.11.4
 [2026.11.3]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.2...v2026.11.3
