@@ -8,7 +8,6 @@
     <owners>Ignacio Calvo</owners>
     <copyright>Copyright (c) 2026 Ignacio Calvo</copyright>
     <projectUrl>https://github.com/icalvo/VideoAbridge</projectUrl>
-    <projectSourceUrl>https://github.com/icalvo/VideoAbridge</projectSourceUrl>
     <packageSourceUrl>https://github.com/icalvo/VideoAbridge/tree/main/packaging/chocolatey</packageSourceUrl>
     <docsUrl>https://github.com/icalvo/VideoAbridge#readme</docsUrl>
     <bugTrackerUrl>https://github.com/icalvo/VideoAbridge/issues</bugTrackerUrl>
@@ -37,7 +36,7 @@ This package depends on the Chocolatey `ffmpeg` package (ffmpeg and ffprobe on P
 ]]></description>
     <releaseNotes>https://github.com/icalvo/VideoAbridge/blob/main/CHANGELOG.md</releaseNotes>
     <dependencies>
-      <dependency id="ffmpeg" />
+      <dependency id="ffmpeg" version="6.0.0" />
     </dependencies>
   </metadata>
   <files>
