@@ -14,7 +14,7 @@
     <bugTrackerUrl>https://github.com/icalvo/VideoAbridge/issues</bugTrackerUrl>
     <licenseUrl>https://github.com/icalvo/VideoAbridge/blob/main/LICENSE</licenseUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
-    <iconUrl>https://raw.githubusercontent.com/icalvo/VideoAbridge/main/src/VideoAbridge/Assets/VideoAbridge.png</iconUrl>
+    <iconUrl>https://cdn.jsdelivr.net/gh/icalvo/VideoAbridge@__ICON_REF__/src/VideoAbridge/Assets/VideoAbridge.png</iconUrl>
     <tags>video editing ffmpeg abridgement</tags>
     <summary>Make short versions of a single, already edited video.</summary>
     <description><![CDATA[
