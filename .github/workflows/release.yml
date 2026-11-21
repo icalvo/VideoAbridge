@@ -3,6 +3,12 @@ name: Release
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      chocolatey_only_version:
+        description: "Publish Chocolatey only for an existing GitHub Release version (e.g. 2026.11.7). Leave empty for a normal release."
+        required: false
+        default: ""
 
 concurrency:
   group: release-main
@@ -23,8 +29,25 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHOCO_ONLY_VERSION: ${{ inputs.chocolatey_only_version }}
         run: |
           set -euo pipefail
+
+          if [[ -n "${CHOCO_ONLY_VERSION:-}" ]]; then
+            VERSION="${CHOCO_ONLY_VERSION#v}"
+            VERSION="${VERSION#V}"
+            TAG="v$VERSION"
+            echo "Chocolatey-only publish for $VERSION (tag $TAG)"
+            if ! gh release view "$TAG" >/dev/null 2>&1; then
+              echo "GitHub Release $TAG does not exist."
+              exit 1
+            fi
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "publish_chocolatey=true" >> "$GITHUB_OUTPUT"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           if [[ ! -f CHANGELOG.md ]]; then
             echo "CHANGELOG.md is missing."
@@ -45,6 +68,7 @@ jobs:
           if [[ -z "$VERSION" ]]; then
             echo "No versioned changelog entry found; skipping release."
             echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "publish_chocolatey=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -58,6 +82,7 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "GitHub Release $TAG already exists; skipping."
             echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "publish_chocolatey=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -76,6 +101,7 @@ jobs:
           } > "$RUNNER_TEMP/release-body.md"
 
           echo "should_release=true" >> "$GITHUB_OUTPUT"
+          echo "publish_chocolatey=true" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "notes_path=$RUNNER_TEMP/release-body.md" >> "$GITHUB_OUTPUT"
@@ -125,3 +151,39 @@ jobs:
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve Chocolatey zip
+        id: choco_zip
+        if: steps.version.outputs.publish_chocolatey == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = '${{ steps.version.outputs.tag }}'
+          $zipName = "VideoAbridge-$tag-win-x64.zip"
+          if ($env:ASSET -and (Test-Path -LiteralPath $env:ASSET)) {
+            $zip = $env:ASSET
+          }
+          else {
+            $zip = Join-Path $env:RUNNER_TEMP $zipName
+            gh release download $tag --pattern $zipName --dir $env:RUNNER_TEMP --clobber
+            if (-not (Test-Path -LiteralPath $zip)) {
+              throw "Failed to download $zipName from release $tag"
+            }
+          }
+          "zip=$zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Publish Chocolatey package
+        if: steps.version.outputs.publish_chocolatey == 'true'
+        shell: pwsh
+        env:
+          CHOCOLATEY_API_KEY: ${{ secrets.CHOCOLATEY_API_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CHOCOLATEY_API_KEY)) {
+            throw 'Repository secret CHOCOLATEY_API_KEY is not set.'
+          }
+
+          & packaging/chocolatey/publish.ps1 `
+            -Version '${{ steps.version.outputs.version }}' `
+            -ZipPath '${{ steps.choco_zip.outputs.zip }}' `
+            -ApiKey $env:CHOCOLATEY_API_KEY

@@ -74,9 +74,9 @@ Open **Help → Keyboard shortcuts** (or press `?`) for a categorized list. Shor
 
 ## Requirements
 
-- .NET 11 SDK
-- FFmpeg and ffprobe on `PATH` (or place `ffmpeg.exe` / `ffprobe.exe` under `tools/ffmpeg/` and copy them next to the app output)
 - Windows (LibVLC via `VideoLAN.LibVLC.Windows`)
+- FFmpeg and ffprobe on `PATH` (Chocolatey package pulls in `ffmpeg`; for local/dev builds place `ffmpeg.exe` / `ffprobe.exe` under `tools/ffmpeg/` or on `PATH`)
+- .NET 11 SDK (to build from source)
 
 ## Build & run
 
@@ -102,11 +102,23 @@ pwsh tools/capture-readme-screenshot.ps1   # manual refresh
 
 If the PNG changes, the pre-push hook asks you to commit it and push again. Skip with `SKIP_README_SCREENSHOT=1 git push`.
 
+## Install (Windows)
+
+```bash
+choco install videoabridge
+```
+
+Requires [Chocolatey](https://chocolatey.org/). The package depends on the Chocolatey `ffmpeg` package.
+
 ## Releases
 
 Notable changes live in [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)). While working, append bullets under **Unreleased**. To publish, rename that section to a version (`## [x.y.z] - YYYY-MM-DD`) and push to `main`.
 
-[.github/workflows/release.yml](.github/workflows/release.yml) reads the latest versioned changelog entry; if that GitHub Release does not exist yet, it runs tests, publishes a self-contained `win-x64` build, and creates the Release (`v` + version) with a zip asset. FFmpeg/ffprobe are not bundled—install them separately (see Requirements).
+[.github/workflows/release.yml](.github/workflows/release.yml) reads the latest versioned changelog entry; if that GitHub Release does not exist yet, it runs tests, publishes a self-contained `win-x64` build, creates the Release (`v` + version) with a zip asset, then packs and pushes the [Chocolatey](https://community.chocolatey.org/) package `videoabridge` (needs repo secret `CHOCOLATEY_API_KEY`). The first Chocolatey submission is moderated; later versions publish automatically after that.
+
+To push Chocolatey for an **existing** GitHub Release without cutting a new app version, run the Release workflow manually (`workflow_dispatch`) and set **chocolatey_only_version** (e.g. `2026.11.7`).
+
+Package sources live under [`packaging/chocolatey/`](packaging/chocolatey/).
 
 ## Typical workflow
 
