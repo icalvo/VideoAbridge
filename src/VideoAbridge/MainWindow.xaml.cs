@@ -18,6 +18,8 @@ public partial class MainWindow : Window, IDisposable
     private readonly DispatcherTimer _previewChromeHideTimer;
     private readonly RelayCommand _zoomToAbridgedContentCommand;
     private readonly RelayCommand _zoomToFitCommand;
+    private readonly RelayCommand _zoomInOnFocusCommand;
+    private readonly RelayCommand _zoomOutOnFocusCommand;
     private bool _shutdownStarted;
     private bool _previewChromeVisible;
     private bool _applyingWindowPlacement;
@@ -33,6 +35,12 @@ public partial class MainWindow : Window, IDisposable
         _zoomToFitCommand = new RelayCommand(
             () => Timeline.ZoomToFit(),
             () => _viewModel.HasVideoLoaded);
+        _zoomInOnFocusCommand = new RelayCommand(
+            () => Timeline.ZoomAroundFocus(zoomIn: true),
+            () => _viewModel.HasVideoLoaded);
+        _zoomOutOnFocusCommand = new RelayCommand(
+            () => Timeline.ZoomAroundFocus(zoomIn: false),
+            () => _viewModel.HasVideoLoaded);
 
         InitializeComponent();
         DataContext = _viewModel;
@@ -43,6 +51,8 @@ public partial class MainWindow : Window, IDisposable
             {
                 _zoomToAbridgedContentCommand.NotifyCanExecuteChanged();
                 _zoomToFitCommand.NotifyCanExecuteChanged();
+                _zoomInOnFocusCommand.NotifyCanExecuteChanged();
+                _zoomOutOnFocusCommand.NotifyCanExecuteChanged();
                 if (_viewModel.HasVideoLoaded && !_viewModel.IsPreviewMode)
                     Dispatcher.BeginInvoke(FocusTimeline, DispatcherPriority.Loaded);
             }
@@ -139,6 +149,10 @@ public partial class MainWindow : Window, IDisposable
     public IRelayCommand ZoomToAbridgedContentCommand => _zoomToAbridgedContentCommand;
 
     public IRelayCommand ZoomToFitCommand => _zoomToFitCommand;
+
+    public IRelayCommand ZoomInOnFocusCommand => _zoomInOnFocusCommand;
+
+    public IRelayCommand ZoomOutOnFocusCommand => _zoomOutOnFocusCommand;
 
     private void ApplyPendingTimelineView()
     {
@@ -536,8 +550,6 @@ public partial class MainWindow : Window, IDisposable
                 TryExecute(_viewModel.RestoreSectionToEndCommand),
             ModifierKeys.Control | ModifierKeys.Shift when e.Key is Key.N =>
                 TryExecute(_viewModel.DuplicateVersionCommand),
-            ModifierKeys.Control | ModifierKeys.Shift when e.Key is Key.T =>
-                TryExecute(_viewModel.ToggleTasksPaneCommand),
             ModifierKeys.Control when e.Key is Key.Tab =>
                 TryExecute(_viewModel.SelectNextVersionCommand) || _viewModel.HasVideoLoaded,
             ModifierKeys.Control when e.Key is Key.O =>
@@ -546,6 +558,8 @@ public partial class MainWindow : Window, IDisposable
                 TryExecute(_viewModel.ExportCommand),
             ModifierKeys.Control when e.Key is Key.D =>
                 TryExecute(_viewModel.DetectScenesCommand),
+            ModifierKeys.Control when e.Key is Key.T =>
+                TryExecute(_viewModel.ToggleTasksPaneCommand),
             ModifierKeys.Control when e.Key is Key.Home =>
                 TryExecute(_viewModel.DeleteSectionFromStartCommand),
             ModifierKeys.Control when e.Key is Key.End =>
@@ -556,12 +570,14 @@ public partial class MainWindow : Window, IDisposable
                 TryExecute(_viewModel.UndoCommand),
             ModifierKeys.Control when e.Key is Key.Y =>
                 TryExecute(_viewModel.RedoCommand),
-            ModifierKeys.Control when e.Key is Key.D1 or Key.NumPad1 =>
-                TryExecute(ZoomToAbridgedContentCommand),
-            ModifierKeys.Control when e.Key is Key.D0 or Key.NumPad0 =>
-                TryExecute(ZoomToFitCommand),
             ModifierKeys.Shift when e.Key is Key.Delete =>
                 TryExecute(_viewModel.RestoreSectionCommand),
+            ModifierKeys.Shift when e.Key is Key.D7 or Key.NumPad7 =>
+                TryNudgePlayhead(-_viewModel.FrameStep),
+            ModifierKeys.Shift when e.Key is Key.D8 or Key.NumPad8 =>
+                TryNudgePlayhead(TimeSpan.FromSeconds(-1)),
+            ModifierKeys.Shift when e.Key is Key.D9 or Key.NumPad9 =>
+                TryNudgePlayhead(TimeSpan.FromSeconds(-10)),
             ModifierKeys.None when e.Key is Key.P =>
                 TryExecute(_viewModel.PlayPauseCommand),
             ModifierKeys.None when e.Key is Key.Home =>
@@ -572,10 +588,27 @@ public partial class MainWindow : Window, IDisposable
             ModifierKeys.None when e.Key is Key.Delete =>
                 TryExecute(_viewModel.DeleteSectionCommand)
                 || TryExecute(_viewModel.DeleteMarkerCommand),
-            ModifierKeys.None when e.Key is Key.Tab =>
+            ModifierKeys.None when e.Key is Key.E =>
                 TryExecute(_viewModel.TogglePreviewModeCommand),
+            ModifierKeys.None when e.Key is Key.D0 or Key.NumPad0 =>
+                TryExecute(ZoomToFitCommand),
+            ModifierKeys.None when e.Key is Key.D1 or Key.NumPad1 =>
+                TryExecute(ZoomToAbridgedContentCommand),
+            ModifierKeys.None when e.Key is Key.D2 or Key.NumPad2 =>
+                TryExecute(ZoomInOnFocusCommand),
+            ModifierKeys.None when e.Key is Key.D3 or Key.NumPad3 =>
+                TryExecute(ZoomOutOnFocusCommand),
+            ModifierKeys.None when e.Key is Key.D7 or Key.NumPad7 =>
+                TryNudgePlayhead(_viewModel.FrameStep),
+            ModifierKeys.None when e.Key is Key.D8 or Key.NumPad8 =>
+                TryNudgePlayhead(TimeSpan.FromSeconds(1)),
+            ModifierKeys.None when e.Key is Key.D9 or Key.NumPad9 =>
+                TryNudgePlayhead(TimeSpan.FromSeconds(10)),
             ModifierKeys.None when e.Key is Key.F2 =>
                 TryExecute(_viewModel.RenameVersionCommand),
+            // "?" is Shift+/ (Oem2 / OemQuestion on US layouts).
+            ModifierKeys.Shift when e.Key is Key.Oem2 or Key.OemQuestion =>
+                ShowKeyboardShortcuts(),
             _ => false
         };
 
@@ -630,6 +663,26 @@ public partial class MainWindow : Window, IDisposable
         if (command is null || !command.CanExecute(null))
             return false;
         command.Execute(null);
+        return true;
+    }
+
+    private bool TryNudgePlayhead(TimeSpan delta)
+    {
+        if (!_viewModel.CanNudgePlayhead())
+            return false;
+        _viewModel.NudgePlayhead(delta);
+        return true;
+    }
+
+    private void KeyboardShortcuts_Click(object sender, RoutedEventArgs e) => ShowKeyboardShortcuts();
+
+    private bool ShowKeyboardShortcuts()
+    {
+        var dialog = new KeyboardShortcutsDialog
+        {
+            Owner = this
+        };
+        dialog.ShowDialog();
         return true;
     }
 

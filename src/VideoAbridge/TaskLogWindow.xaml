@@ -10,7 +10,8 @@
         Background="#1E1E1E"
         Icon="pack://application:,,,/Assets/VideoAbridge.ico"
         ShowInTaskbar="False"
-        WindowStartupLocation="CenterOwner">
+        WindowStartupLocation="CenterOwner"
+        PreviewKeyDown="Window_PreviewKeyDown">
     <Grid Margin="8">
         <TextBox x:Name="LogBox"
                  Text="{Binding LogText, Mode=OneWay}"

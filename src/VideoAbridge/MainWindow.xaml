@@ -230,73 +230,82 @@
                           ToolTip="{Binding RedoToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
                 <Separator/>
-                <MenuItem Header="Add Marker"
+                <MenuItem Header="Add _Marker"
                           Command="{Binding AddMarkerAtPlayheadCommand}"
                           InputGestureText="M"
                           ToolTip="{Binding AddMarkerToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
-                <MenuItem Header="Delete Marker"
+                <MenuItem Header="Delete Mar_ker"
                           Command="{Binding DeleteMarkerCommand}"
                           InputGestureText="Delete"
                           ToolTip="{Binding DeleteMarkerToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
                 <Separator/>
-                <MenuItem Header="Delete Section"
+                <MenuItem Header="_Delete Section"
                           Command="{Binding DeleteSectionCommand}"
                           InputGestureText="Delete"
                           ToolTip="{Binding DeleteSectionToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
-                <MenuItem Header="Restore Section"
+                <MenuItem Header="Res_tore Section"
                           Command="{Binding RestoreSectionCommand}"
                           InputGestureText="Shift+Delete"
                           ToolTip="{Binding RestoreSectionToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
-                <MenuItem Header="Delete Section from Start"
+                <MenuItem Header="Delete Section from _Start"
                           Command="{Binding DeleteSectionFromStartCommand}"
                           InputGestureText="Ctrl+Home"
                           ToolTip="{Binding DeleteSectionFromStartToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
-                <MenuItem Header="Delete Section to End"
+                <MenuItem Header="Delete Section to _End"
                           Command="{Binding DeleteSectionToEndCommand}"
                           InputGestureText="Ctrl+End"
                           ToolTip="{Binding DeleteSectionToEndToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
-                <MenuItem Header="Restore Section from Start"
+                <MenuItem Header="Restore Section from St_art"
                           Command="{Binding RestoreSectionFromStartCommand}"
                           InputGestureText="Ctrl+Shift+Home"
                           ToolTip="{Binding RestoreSectionFromStartToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
-                <MenuItem Header="Restore Section to End"
+                <MenuItem Header="Restore Section to E_nd"
                           Command="{Binding RestoreSectionToEndCommand}"
                           InputGestureText="Ctrl+Shift+End"
                           ToolTip="{Binding RestoreSectionToEndToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
                 <Separator/>
-                <MenuItem Header="Detect Scenes"
+                <MenuItem Header="Detect S_cenes"
                           Command="{Binding DetectScenesCommand}"
                           InputGestureText="Ctrl+D"
                           ToolTip="{Binding DetectScenesToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
             </MenuItem>
             <MenuItem Header="_View" IsEnabled="{Binding HasVideoLoaded}">
-                <MenuItem Header="Toggle Edit / _Preview"
+                <MenuItem Header="Toggle _Edit / Preview"
                           Command="{Binding TogglePreviewModeCommand}"
-                          InputGestureText="Tab"
+                          InputGestureText="E"
                           ToolTip="{Binding TogglePreviewModeToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
+                <MenuItem Header="_Play / Pause"
+                          Command="{Binding PlayPauseCommand}"
+                          InputGestureText="P"/>
                 <MenuItem Header="Go to _Beginning"
                           Command="{Binding GoToBeginningCommand}"
                           InputGestureText="Home"/>
                 <MenuItem Header="_Tasks pane"
                           Command="{Binding ToggleTasksPaneCommand}"
-                          InputGestureText="Ctrl+Shift+T"/>
+                          InputGestureText="Ctrl+T"/>
                 <Separator/>
-                <MenuItem Header="Zoom to _abridged content"
+                <MenuItem Header="Zoom to abridged _content"
                           Command="{Binding ZoomToAbridgedContentCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                          InputGestureText="Ctrl+1"/>
+                          InputGestureText="1"/>
                 <MenuItem Header="Zoom to _fit"
                           Command="{Binding ZoomToFitCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                          InputGestureText="Ctrl+0"/>
+                          InputGestureText="0"/>
+                <MenuItem Header="Zoom _in on focus"
+                          Command="{Binding ZoomInOnFocusCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                          InputGestureText="2"/>
+                <MenuItem Header="Zoom _out on focus"
+                          Command="{Binding ZoomOutOnFocusCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                          InputGestureText="3"/>
             </MenuItem>
             <MenuItem Header="_Version" IsEnabled="{Binding HasVideoLoaded}">
                 <MenuItem Header="_New Version…"
@@ -314,13 +323,22 @@
                           InputGestureText="F2"
                           ToolTip="{Binding RenameVersionToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
+                <MenuItem Header="De_lete Version"
+                          Command="{Binding DeleteActiveVersionCommand}"
+                          ToolTip="{Binding DeleteVersionToolTip}"
+                          ToolTipService.ShowOnDisabled="True"/>
                 <Separator/>
-                <MenuItem Header="_Next Version"
+                <MenuItem Header="Ne_xt Version"
                           Command="{Binding SelectNextVersionCommand}"
                           InputGestureText="Ctrl+Tab"/>
                 <MenuItem Header="_Previous Version"
                           Command="{Binding SelectPreviousVersionCommand}"
                           InputGestureText="Ctrl+Shift+Tab"/>
+            </MenuItem>
+            <MenuItem Header="_Help">
+                <MenuItem Header="_Keyboard shortcuts"
+                          InputGestureText="?"
+                          Click="KeyboardShortcuts_Click"/>
             </MenuItem>
         </Menu>
 
@@ -433,7 +451,7 @@
                         Cursor="Hand"
                         ToolTip="{Binding CreateVersionToolTip}"
                         ToolTipService.ShowOnDisabled="True"
-                        Command="{Binding AddVersionTabCommand}"
+                        Command="{Binding CreateVersionCommand}"
                         Style="{StaticResource ToolbarButtonBase}"/>
             </StackPanel>
         </Border>

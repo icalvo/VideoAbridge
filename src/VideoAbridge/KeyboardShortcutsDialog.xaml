@@ -1,0 +1,221 @@
+<Window x:Class="VideoAbridge.KeyboardShortcutsDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Keyboard shortcuts"
+        SizeToContent="WidthAndHeight"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="#2D2D30"
+        MinWidth="560"
+        PreviewKeyDown="Window_PreviewKeyDown">
+    <Window.Resources>
+        <Style x:Key="CategoryHeader" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#CCCCCC"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,0,0,3"/>
+        </Style>
+        <Style x:Key="ShortcutAction" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#DDDDDD"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Margin" Value="0,1,8,1"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="ShortcutKeys" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#9CDCFE"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="Margin" Value="0,1,0,1"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="HorizontalAlignment" Value="Right"/>
+        </Style>
+    </Window.Resources>
+    <DockPanel Margin="14,12,14,10">
+        <TextBlock DockPanel.Dock="Top"
+                   Text="Keyboard shortcuts"
+                   Foreground="White"
+                   FontSize="13"
+                   FontWeight="SemiBold"
+                   Margin="0,0,0,8"/>
+        <Button DockPanel.Dock="Bottom"
+                Content="Close"
+                Width="72"
+                Height="24"
+                HorizontalAlignment="Right"
+                Margin="0,10,0,0"
+                FontSize="11"
+                IsCancel="True"
+                IsDefault="True"
+                Click="Close_Click"/>
+        <UniformGrid Columns="2" Rows="3">
+            <!-- File -->
+            <StackPanel Margin="0,0,18,10">
+                <TextBlock Text="File" Style="{StaticResource CategoryHeader}"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Open Video" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="0" Grid.Column="1" Text="Ctrl+O" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Export" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="1" Grid.Column="1" Text="Ctrl+S" Style="{StaticResource ShortcutKeys}"/>
+                </Grid>
+            </StackPanel>
+
+            <!-- Playback / View -->
+            <StackPanel Margin="0,0,0,10">
+                <TextBlock Text="Playback / View" Style="{StaticResource CategoryHeader}"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Play / Pause" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="0" Grid.Column="1" Text="P" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Go to Beginning" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="1" Grid.Column="1" Text="Home" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Nudge playhead +1 frame / 1s / 10s" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="2" Grid.Column="1" Text="7 / 8 / 9" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Nudge playhead backward" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="3" Grid.Column="1" Text="Shift+7 / 8 / 9" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Toggle Edit / Preview" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="4" Grid.Column="1" Text="E" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Zoom in / out on focus" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="5" Grid.Column="1" Text="2 / 3" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="6" Grid.Column="0" Text="Zoom to abridged content" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="6" Grid.Column="1" Text="1" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="7" Grid.Column="0" Text="Zoom to fit" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="7" Grid.Column="1" Text="0" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="8" Grid.Column="0" Text="Tasks pane" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="8" Grid.Column="1" Text="Ctrl+T" Style="{StaticResource ShortcutKeys}"/>
+                </Grid>
+            </StackPanel>
+
+            <!-- Edit -->
+            <StackPanel Margin="0,0,18,10">
+                <TextBlock Text="Edit" Style="{StaticResource CategoryHeader}"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Undo" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="0" Grid.Column="1" Text="Ctrl+Z" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Redo" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="1" Grid.Column="1" Text="Ctrl+Y" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Add Marker" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="2" Grid.Column="1" Text="M" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Delete Marker / Section" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="3" Grid.Column="1" Text="Delete" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Restore Section" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="4" Grid.Column="1" Text="Shift+Delete" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Delete Section from Start" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="5" Grid.Column="1" Text="Ctrl+Home" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="6" Grid.Column="0" Text="Delete Section to End" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="6" Grid.Column="1" Text="Ctrl+End" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="7" Grid.Column="0" Text="Restore Section from Start" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="7" Grid.Column="1" Text="Ctrl+Shift+Home" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="8" Grid.Column="0" Text="Restore Section to End" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="8" Grid.Column="1" Text="Ctrl+Shift+End" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="9" Grid.Column="0" Text="Detect Scenes" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="9" Grid.Column="1" Text="Ctrl+D" Style="{StaticResource ShortcutKeys}"/>
+                </Grid>
+            </StackPanel>
+
+            <!-- Timeline (Edit) -->
+            <StackPanel Margin="0,0,0,10">
+                <TextBlock Text="Timeline (Edit)" Style="{StaticResource CategoryHeader}"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Previous / next marker or cut" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="0" Grid.Column="1" Text="Left / Right" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Nearest item in other lane" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="1" Grid.Column="1" Text="Up / Down" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Activate focused item" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="2" Grid.Column="1" Text="Space" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Shift-activate focused item" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="3" Grid.Column="1" Text="Shift+Space" Style="{StaticResource ShortcutKeys}"/>
+                </Grid>
+            </StackPanel>
+
+            <!-- Versions -->
+            <StackPanel Margin="0,0,18,0">
+                <TextBlock Text="Versions" Style="{StaticResource CategoryHeader}"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="New Version" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="0" Grid.Column="1" Text="Ctrl+N" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Duplicate Version" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="1" Grid.Column="1" Text="Ctrl+Shift+N" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Rename Version" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="2" Grid.Column="1" Text="F2" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Next Version" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="3" Grid.Column="1" Text="Ctrl+Tab" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Previous Version" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="4" Grid.Column="1" Text="Ctrl+Shift+Tab" Style="{StaticResource ShortcutKeys}"/>
+                </Grid>
+            </StackPanel>
+
+            <!-- Help -->
+            <StackPanel>
+                <TextBlock Text="Help" Style="{StaticResource CategoryHeader}"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="Keyboard shortcuts" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Column="1" Text="?" Style="{StaticResource ShortcutKeys}"/>
+                </Grid>
+            </StackPanel>
+        </UniformGrid>
+    </DockPanel>
+</Window>

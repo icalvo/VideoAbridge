@@ -54,6 +54,12 @@ using System.Windows;
 [assembly: SuppressMessage(
     "Usage",
     "CA1515:Consider making public types internal",
+    Justification = "WPF requires windows referenced from XAML to be public.",
+    Scope = "type",
+    Target = "~T:VideoAbridge.KeyboardShortcutsDialog")]
+[assembly: SuppressMessage(
+    "Usage",
+    "CA1515:Consider making public types internal",
     Justification = "Public EventArgs for TimelineControl events required by WPF public API surface.",
     Scope = "type",
     Target = "~T:VideoAbridge.Controls.TimeSpanEventArgs")]

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2026.11.7] - 2026-11-21
+
+### Added
+
+- Help → Keyboard shortcuts modal (also `?`); Esc closes. Shortcuts listed in two compact columns by category.
+- Playhead nudge: `7` / `8` / `9` forward by 1 frame / 1s / 10s; `Shift+7` / `8` / `9` backward (frame step from probed FPS; disabled while playing).
+- `2` / `3` zoom in / out around the focused marker or cut (playhead if none).
+- Version → Delete Version (disabled when only one version remains); Esc closes the task log window.
+- View → Play / Pause; View zoom-in/out-on-focus menu items.
+
+### Changed
+
+- Toggle Edit / Preview shortcut is `E` (Tab no longer toggles mode).
+- Zoom to abridged / fit is `1` / `0` (was Ctrl+1 / Ctrl+0); Tasks pane is `Ctrl+T` (was Ctrl+Shift+T).
+- Menu AccessKeys filled in for Edit / View / Version items.
+- Version tab `+` opens the same name dialog as Ctrl+N / New Version (no auto-invented name).
+
 ## [2026.11.6] - 2026-11-20
 
 ### Added
@@ -81,7 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial GitHub Release of VideoAbridge: open a single finished video, mark and delete sections, scene detection, multiple abridged versions, Edit/Preview modes, joins/fades, undo/redo, marker cache, and FFmpeg export.
 - CI release workflow publishing a self-contained Windows x64 build zip.
 
-[Unreleased]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.6...HEAD
+[Unreleased]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.7...HEAD
+[2026.11.7]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.6...v2026.11.7
 [2026.11.6]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.5...v2026.11.6
 [2026.11.5]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.4...v2026.11.5
 [2026.11.4]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.3...v2026.11.4

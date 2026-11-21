@@ -44,7 +44,7 @@ VideoAbridge is not a general [NLE](https://en.wikipedia.org/wiki/Non-linear_edi
 
 ### Keyboard shortcuts
 
-Shortcuts are ignored while typing in a text box.
+Open **Help → Keyboard shortcuts** (or press `?`) for a categorized list. Shortcuts are ignored while typing in a text box.
 
 | Shortcut              | Action                                    |
 | --------------------- | ----------------------------------------- |
@@ -52,6 +52,8 @@ Shortcuts are ignored while typing in a text box.
 | Ctrl+S                | Export                                    |
 | P                     | Play / Pause                              |
 | Home                  | Go to Beginning                           |
+| 7 / 8 / 9             | Nudge playhead +1 frame / +1s / +10s      |
+| Shift+7 / 8 / 9       | Nudge playhead −1 frame / −1s / −10s      |
 | Ctrl+Z / Ctrl+Y       | Undo / Redo                               |
 | M                     | Add Marker                                |
 | Delete                | Delete Marker / Delete Section            |
@@ -59,15 +61,16 @@ Shortcuts are ignored while typing in a text box.
 | Ctrl+Home / End       | Delete Section from Start / to End        |
 | Ctrl+Shift+Home / End | Restore Section from Start / to End       |
 | Ctrl+D                | Detect Scenes                             |
-| Tab                   | Toggle Edit / Preview                     |
+| E                     | Toggle Edit / Preview                     |
 | Left / Right          | Focus previous / next marker or cut (Edit)|
 | Up / Down             | Focus nearest item in the other lane (Edit)|
 | Space / Shift+Space   | Click / Shift-click focused item (Edit)   |
-| Ctrl+1 / Ctrl+0       | Zoom to abridged content / Zoom to fit    |
+| 2 / 3                 | Zoom in / out on focused marker or cut    |
+| 1 / 0                 | Zoom to abridged content / Zoom to fit    |
 | Ctrl+N / Ctrl+Shift+N | New / Duplicate Version                   |
 | Ctrl+Tab / Ctrl+Shift+Tab | Next / Previous Version               |
 | F2                    | Rename Version (inline on the active tab) |
-| Ctrl+Shift+T          | Expand / collapse Tasks pane              |
+| Ctrl+T                | Expand / collapse Tasks pane              |
 
 ## Requirements
 

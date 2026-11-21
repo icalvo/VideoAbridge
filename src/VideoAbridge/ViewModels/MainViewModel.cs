@@ -52,6 +52,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     private DateTime _seekGateUntilUtc;
     private bool _inCrossfade;
     private bool _committingVersionRename;
+    private double _frameRate = 30;
 
     [ObservableProperty] private string? _videoPath;
     [ObservableProperty] private Timeline? _timeline;
@@ -526,19 +527,6 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         BeginInlineRename(_versionSet.ActiveVersionId);
     }
 
-    /// <summary>Creates a version from shared scenes with an auto name, then starts inline rename.</summary>
-    [RelayCommand(CanExecute = nameof(CanManageVersions))]
-    private void AddVersionTab()
-    {
-        if (_versionSet is null)
-            return;
-
-        var name = SuggestNewVersionName();
-        ApplyVersionResult(_versionSet.CreateVersionFromScenes(name));
-        if (_versionSet is not null)
-            BeginInlineRename(_versionSet.ActiveVersionId);
-    }
-
     internal void BeginInlineRename(Guid versionId)
     {
         if (!CanManageVersions())
@@ -676,6 +664,46 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         ApplyVersionResult(_versionSet.Remove(versionId));
     }
 
+    [RelayCommand(CanExecute = nameof(CanDeleteVersion))]
+    private void DeleteActiveVersion()
+    {
+        if (_versionSet is null)
+            return;
+
+        DeleteVersion(_versionSet.ActiveVersionId);
+    }
+
+    /// <summary>Nudge the playhead by <paramref name="delta"/> on the active timeline clock.</summary>
+    public void NudgePlayhead(TimeSpan delta)
+    {
+        if (!CanNudgePlayhead())
+            return;
+
+        if (IsPreviewMode)
+        {
+            SeekAbridgedPlayhead(AbridgedPlayhead + delta);
+            return;
+        }
+
+        if (Timeline is null)
+            return;
+
+        var next = Playhead + delta;
+        if (next < TimeSpan.Zero)
+            next = TimeSpan.Zero;
+        else if (next > Timeline.Duration)
+            next = Timeline.Duration;
+
+        SeekPlayhead(next);
+    }
+
+    public bool CanNudgePlayhead() => HasVideoLoaded && !IsPlaying;
+
+    public TimeSpan FrameStep =>
+        _frameRate > 1e-6
+            ? TimeSpan.FromSeconds(1.0 / _frameRate)
+            : TimeSpan.FromSeconds(1.0 / 30.0);
+
     private bool CanManageVersions() => GetManageVersionsBlockReason() is null;
 
     public string? CreateVersionToolTip => GetManageVersionsBlockReason();
@@ -738,24 +766,6 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             candidate = $"{baseName} Copy {suffix}";
             suffix++;
         }
-
-        return candidate;
-    }
-
-    private string SuggestNewVersionName()
-    {
-        if (_versionSet is null)
-            return "Version 2";
-
-        var n = _versionSet.Versions.Count + 1;
-        string candidate;
-        do
-        {
-            candidate = $"Version {n}";
-            n++;
-        }
-        while (_versionSet.Versions.Any(v =>
-                   string.Equals(v.Name, candidate, StringComparison.OrdinalIgnoreCase)));
 
         return candidate;
     }
@@ -1982,8 +1992,8 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         CreateVersionCommand.NotifyCanExecuteChanged();
         DuplicateVersionCommand.NotifyCanExecuteChanged();
         RenameVersionCommand.NotifyCanExecuteChanged();
-        AddVersionTabCommand.NotifyCanExecuteChanged();
         DeleteVersionCommand.NotifyCanExecuteChanged();
+        DeleteActiveVersionCommand.NotifyCanExecuteChanged();
         SelectVersionCommand.NotifyCanExecuteChanged();
         SelectNextVersionCommand.NotifyCanExecuteChanged();
         SelectPreviousVersionCommand.NotifyCanExecuteChanged();
@@ -2446,6 +2456,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             var fullPath = Path.GetFullPath(path);
             var info = await _probe.ProbeAsync(fullPath).ConfigureAwait(true);
             duration = info.Duration;
+            _frameRate = info.FrameRate > 1e-6 ? info.FrameRate : 30;
             VideoPath = fullPath;
             _player.Load(fullPath);
             IsPlaying = false;

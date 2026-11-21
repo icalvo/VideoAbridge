@@ -507,6 +507,48 @@ public partial class TimelineControl : UserControl
     }
 
     /// <summary>
+    /// Zoom in/out around the focused marker or cut (red triangle); falls back to the playhead.
+    /// </summary>
+    /// <param name="zoomIn">True to zoom in (~1.1×), false to zoom out.</param>
+    public void ZoomAroundFocus(bool zoomIn)
+    {
+        var min = MinPixelsPerSecond;
+        var max = Math.Max(MaxPixelsPerSecond, min);
+        var oldPps = Math.Max(min, PixelsPerSecond);
+        var factor = zoomIn ? 1.1 : 1 / 1.1;
+        var newPps = Math.Clamp(oldPps * factor, min, max);
+        if (Math.Abs(newPps - oldPps) < 1e-9)
+            return;
+
+        var centerSeconds = TryGetFocusCenterSeconds() ?? Playhead.TotalSeconds;
+        var viewport = GetViewportWidth();
+        var viewportCenterX = viewport > 1 ? viewport / 2 : 0;
+
+        PixelsPerSecond = newPps;
+        UpdateLayout();
+        var newX = centerSeconds * newPps;
+        Scroller.ScrollToHorizontalOffset(Math.Max(0, newX - viewportCenterX));
+        TimelineViewChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private double? TryGetFocusCenterSeconds()
+    {
+        if (IsPreviewMode || Timeline is null || FocusedTimelineItemId is not Guid id)
+            return null;
+
+        return TimelineFocusKind switch
+        {
+            TimelineFocusKind.Marker => Timeline.Markers.FirstOrDefault(m => m.Id == id) is { } marker
+                ? marker.Time.TotalSeconds
+                : null,
+            TimelineFocusKind.DeletedRun => Timeline.GetDeletedRuns().FirstOrDefault(r => r.Id == id) is { } run
+                ? (run.Range.Start.TotalSeconds + run.Range.End.TotalSeconds) / 2.0
+                : null,
+            _ => null,
+        };
+    }
+
+    /// <summary>
     /// Zoom so all undeleted (kept) sections fit in the viewport.
     /// In preview mode the display is already abridged, so this matches <see cref="ZoomToFit"/>.
     /// </summary>
