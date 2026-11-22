@@ -12,11 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Chocolatey package `videoabridge` (downloads the GitHub Release zip; depends on `ffmpeg`); release workflow packs and pushes it via `CHOCOLATEY_API_KEY`.
 - MIT `LICENSE`.
 
-### Fixed
-
-- Chocolatey `iconUrl` uses jsDelivr pinned to the release tag (GitHub raw URLs are not allowed).
-- Chocolatey guidelines: `ffmpeg` dependency has a minimum version (`6.0.0`); dropped duplicate `projectSourceUrl` (same as `projectUrl`).
-
 ## [2026.11.7] - 2026-11-21
 
 ### Added
