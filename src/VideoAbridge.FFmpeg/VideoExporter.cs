@@ -69,11 +69,7 @@ public sealed class VideoExporter(string? ffmpegPath = null)
         ];
 
         // Stream-copy shortcut only for high-quality exports of a single trimmed clip.
-        if (!options.ForceTranscode
-            && plan.Clips.Count == 1
-            && plan.JoinsBetweenClips.Count == 0
-            && !plan.FadeFromBlackAtStart
-            && !plan.FadeToBlackAtEnd)
+        if (!options.ForceTranscode && plan.AllowsStreamCopy)
         {
             var clip = plan.Clips[0];
             args.AddRange(

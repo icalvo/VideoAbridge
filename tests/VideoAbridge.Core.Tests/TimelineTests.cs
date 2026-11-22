@@ -30,6 +30,55 @@ public class TimelineTests
     }
 
     [Fact]
+    public void FromPersistedStateRejectsMarkerOutsideDuration()
+    {
+        var error = Timeline.FromPersistedState(
+                TimeSpan.FromSeconds(60),
+                [
+                    new Marker(Guid.NewGuid(), TimeSpan.FromSeconds(30), MarkerSource.User),
+                    new Marker(Guid.NewGuid(), TimeSpan.FromSeconds(60), MarkerSource.User)
+                ],
+                [false, false, false],
+                [],
+                ProjectSettings.Default)
+            .RequireError();
+
+        error.Code.Should().Be("MarkerOutOfRange");
+    }
+
+    [Fact]
+    public void FromPersistedStateRejectsMarkerAtOrBeforeZero()
+    {
+        var error = Timeline.FromPersistedState(
+                TimeSpan.FromSeconds(60),
+                [new Marker(Guid.NewGuid(), TimeSpan.Zero, MarkerSource.User)],
+                [false, false],
+                [],
+                ProjectSettings.Default)
+            .RequireError();
+
+        error.Code.Should().Be("MarkerOutOfRange");
+    }
+
+    [Fact]
+    public void FromPersistedStateAcceptsMarkersInsideDuration()
+    {
+        var timeline = Timeline.FromPersistedState(
+                TimeSpan.FromSeconds(60),
+                [
+                    new Marker(Guid.NewGuid(), TimeSpan.FromSeconds(10), MarkerSource.User),
+                    new Marker(Guid.NewGuid(), TimeSpan.FromSeconds(50), MarkerSource.SceneDetect)
+                ],
+                [false, true, false],
+                [new JoinTransition(Guid.NewGuid(), TransitionMode.HardCut, 0)],
+                ProjectSettings.Default)
+            .RequireOk();
+
+        timeline.Markers.Should().HaveCount(2);
+        timeline.Segments.Should().HaveCount(3);
+    }
+
+    [Fact]
     public void AddMarkerSplitsSegmentInheritingState()
     {
         var timeline = CreateWithMarkers(10, 20, 30);

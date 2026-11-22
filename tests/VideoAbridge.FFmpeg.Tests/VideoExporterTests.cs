@@ -45,4 +45,37 @@ public class VideoExporterTests
         filter.Should().Contain("concat=");
         filter.Should().NotContain("xfade=");
     }
+
+    [Fact]
+    public void BuildArgumentsUsesStreamCopyWhenPlanAllows()
+    {
+        var plan = new ExportPlan(
+            [new TimeRange(TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(8))],
+            [],
+            FadeFromBlackSeconds: null,
+            FadeToBlackSeconds: null);
+
+        plan.AllowsStreamCopy.Should().BeTrue();
+
+        var args = VideoExporter.BuildArguments("in.mp4", "out.mp4", plan);
+        args.Should().Contain("-c");
+        args.Should().Contain("copy");
+        args.Should().NotContain("-filter_complex");
+    }
+
+    [Fact]
+    public void BuildArgumentsTranscodesWhenPlanHasFades()
+    {
+        var plan = new ExportPlan(
+            [new TimeRange(TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(8))],
+            [],
+            FadeFromBlackSeconds: 0.5,
+            FadeToBlackSeconds: null);
+
+        plan.AllowsStreamCopy.Should().BeFalse();
+
+        var args = VideoExporter.BuildArguments("in.mp4", "out.mp4", plan);
+        args.Should().Contain("-filter_complex");
+        args.Should().NotContain("copy");
+    }
 }

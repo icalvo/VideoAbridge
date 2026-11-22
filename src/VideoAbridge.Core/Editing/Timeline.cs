@@ -65,6 +65,8 @@ public sealed class Timeline
             return Fail<Timeline>("InvalidDuration", "Duration must be positive.");
         if (segmentDeleted.Count != markers.Count + 1)
             return Fail<Timeline>("InvalidSegmentCount", "Segment count must equal marker count + 1.");
+        if (markers.Any(m => m.Time <= TimeSpan.Zero || m.Time >= duration))
+            return Fail<Timeline>("MarkerOutOfRange", "Marker time must be strictly inside the timeline.");
 
         ImmutableList<Marker> orderedMarkers = [.. markers.OrderBy(m => m.Time)];
         ImmutableList<SegmentState> segments = [.. segmentDeleted.Select(d => new SegmentState(d))];

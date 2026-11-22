@@ -14,4 +14,14 @@ public sealed record ExportPlan(
     public bool FadeFromBlackAtStart => FadeFromBlackSeconds is not null;
 
     public bool FadeToBlackAtEnd => FadeToBlackSeconds is not null;
+
+    /// <summary>
+    /// True when the plan is a single trimmed clip with no joins or edge fades,
+    /// so a stream-copy export needs no filter graph.
+    /// </summary>
+    public bool AllowsStreamCopy =>
+        Clips.Count == 1
+        && JoinsBetweenClips.Count == 0
+        && !FadeFromBlackAtStart
+        && !FadeToBlackAtEnd;
 }
