@@ -679,7 +679,7 @@
                         <StackPanel Visibility="{Binding HasSelectedJoin, Converter={StaticResource BoolToVis}}">
                             <TextBlock Text="Crossfade (s)" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
                             <TextBlock Foreground="#AAA" TextWrapping="Wrap" Margin="0,0,0,8"
-                                       Text="0 = hard cut. Click a Cut/XF on the timeline to select it."/>
+                                       Text="0 = hard cut."/>
                             <TextBox Text="{Binding SelectedCrossfadeSeconds, UpdateSourceTrigger=LostFocus}"
                                      Margin="0,0,0,4"
                                      KeyDown="DurationTextBox_KeyDown"
