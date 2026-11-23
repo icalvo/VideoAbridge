@@ -739,6 +739,7 @@ public partial class TimelineControl : UserControl
         SetCanvasWidth(width);
 
         var boundaries = timeline.GetBoundaries();
+        var (keptRuns, deletedRuns) = timeline.GetKeptAndDeletedRuns();
         const double trackTop = 70;
         const double trackHeight = 36;
 
@@ -762,7 +763,7 @@ public partial class TimelineControl : UserControl
             RootCanvas.Children.Add(rect);
         }
 
-        foreach (var shade in timeline.GetTransitionShadeRanges())
+        foreach (var shade in timeline.GetTransitionShadeRanges(keptRuns, deletedRuns))
         {
             var left = shade.Start.TotalSeconds * pps;
             var right = shade.End.TotalSeconds * pps;
@@ -785,7 +786,7 @@ public partial class TimelineControl : UserControl
 
         DrawKeepDurationLabels(timeline, pps, trackTop, trackHeight);
 
-        foreach (var run in timeline.GetDeletedRuns())
+        foreach (var run in deletedRuns)
         {
             var left = run.Range.Start.TotalSeconds * pps;
             var right = run.Range.End.TotalSeconds * pps;

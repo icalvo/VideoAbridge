@@ -109,12 +109,13 @@ public sealed class AbridgedTimelineLayout
     public static AbridgedTimelineLayout FromTimeline(Timeline timeline)
     {
         ArgumentNullException.ThrowIfNull(timeline);
-        return timeline.TryBuildExportPlan().Match(
+        var (kept, deleted) = timeline.GetKeptAndDeletedRuns();
+        return timeline.TryBuildExportPlan(kept, deleted).Match(
             plan =>
             {
                 ImmutableList<DeletedRunId> runIds =
                 [
-                    .. timeline.GetDeletedRuns().Where(r => r.IsInterior).Select(r => r.Id)
+                    .. deleted.Where(r => r.IsInterior).Select(r => r.Id)
                 ];
                 return FromPlan(plan, runIds);
             },

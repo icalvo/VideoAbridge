@@ -78,30 +78,19 @@ public sealed class Timeline
         [TimeSpan.Zero, .. Markers.Select(m => m.Time), Duration];
 
     public ImmutableList<DeletedRun> GetDeletedRuns() =>
-        CollectDeletedRanges().Aggregate(
-            (Runs: ImmutableList<DeletedRun>.Empty, InteriorIndex: 0),
-            (state, range) =>
-            {
-                if (!range.IsInteriorOf(Duration))
-                {
-                    var edgeId = range.Covers(Duration)
-                        ? DeletedRunId.Full
-                        : range.TouchesStart
-                            ? DeletedRunId.Leading
-                            : DeletedRunId.Trailing;
-                    return (state.Runs.Add(new DeletedRun(edgeId, range, false, null)), state.InteriorIndex);
-                }
-
-                var join = state.InteriorIndex < Joins.Count
-                    ? Joins[state.InteriorIndex]
-                    : new JoinTransition(DeletedRunId.New(), TransitionMode.HardCut, TimeSpan.Zero);
-                return (
-                    state.Runs.Add(new DeletedRun(join.DeletedRunId, range, true, join)),
-                    state.InteriorIndex + 1);
-            }).Runs;
+        ToDeletedRuns(CollectDeletedRanges());
 
     public ImmutableList<TimeRange> GetKeptRuns() =>
         CollectContiguousSegmentRanges(deleted: false);
+
+    /// <summary>
+    /// Kept and deleted runs from one segment walk (avoids duplicate scans when both are needed).
+    /// </summary>
+    public (ImmutableList<TimeRange> Kept, ImmutableList<DeletedRun> Deleted) GetKeptAndDeletedRuns()
+    {
+        var (kept, deletedRanges) = CollectKeptAndDeletedRanges();
+        return (kept, ToDeletedRuns(deletedRanges));
+    }
 
     /// <summary>Total duration of all non-deleted sections (the abridged output length).</summary>
     public TimeSpan GetAbridgedDuration() =>
@@ -215,9 +204,11 @@ public sealed class Timeline
     /// </summary>
     private DomainError? GetTransitionFitError()
     {
+        var (kept, deleted) = GetKeptAndDeletedRuns();
+
         if (Settings.FadeFromBlackSeconds is { } startFade)
         {
-            var max = GetStartFadeCap();
+            var max = ComputeStartFadeCap(kept, deleted);
             if (startFade > max + 1e-9)
             {
                 return new DomainError(
@@ -228,7 +219,7 @@ public sealed class Timeline
 
         if (Settings.FadeToBlackSeconds is { } endFade)
         {
-            var max = GetEndFadeCap();
+            var max = ComputeEndFadeCap(kept, deleted);
             if (endFade > max + 1e-9)
             {
                 return new DomainError(
@@ -237,7 +228,7 @@ public sealed class Timeline
             }
         }
 
-        foreach (var run in GetDeletedRuns())
+        foreach (var run in deleted)
         {
             if (!run.IsInterior
                 || run.Join is not { Mode: TransitionMode.Crossfade, Crossfade: var crossfade }
@@ -246,7 +237,7 @@ public sealed class Timeline
                 continue;
             }
 
-            var cap = GetCrossfadeCap(run.Range);
+            var cap = ComputeCrossfadeCap(run.Range, kept);
             if (crossfade > cap)
             {
                 return new DomainError(
@@ -373,11 +364,12 @@ public sealed class Timeline
         if (index < 0)
             return new DomainError("JoinNotFound", "Deleted run join was not found.");
 
-        var run = GetDeletedRuns().FirstOrDefault(r => r.Id == deletedRunId);
+        var (kept, deletedRuns) = GetKeptAndDeletedRuns();
+        var run = deletedRuns.FirstOrDefault(r => r.Id == deletedRunId);
         if (run is null || !run.IsInterior)
             return new DomainError("JoinNotInterior", "Crossfade requires an interior deleted run.");
 
-        var cap = GetCrossfadeCap(run.Range);
+        var cap = ComputeCrossfadeCap(run.Range, kept);
         if (cap <= TimeSpan.Zero)
             return new DomainError("CrossfadeCapZero", "Adjacent kept sections are too short for a crossfade.");
 
@@ -431,12 +423,21 @@ public sealed class Timeline
 
     public Result<ExportPlan> TryBuildExportPlan()
     {
-        var kept = GetKeptRuns();
+        var (kept, deletedRuns) = GetKeptAndDeletedRuns();
+        return TryBuildExportPlan(kept, deletedRuns);
+    }
+
+    public Result<ExportPlan> TryBuildExportPlan(
+        ImmutableList<TimeRange> kept,
+        ImmutableList<DeletedRun> deletedRuns)
+    {
+        ArgumentNullException.ThrowIfNull(kept);
+        ArgumentNullException.ThrowIfNull(deletedRuns);
         if (kept.Count == 0)
             return new DomainError("NothingToExport", "There is no kept material to export.");
 
         ImmutableList<TimeRange> clips = [.. kept];
-        ImmutableList<DeletedRun> deleted = [.. GetDeletedRuns().Where(r => r.IsInterior)];
+        ImmutableList<DeletedRun> deleted = [.. deletedRuns.Where(r => r.IsInterior)];
 
         if (clips.Count != deleted.Count + 1)
             return new DomainError("InconsistentRuns", "Kept/deleted run topology is inconsistent.");
@@ -460,14 +461,14 @@ public sealed class Timeline
 
         if (Settings.FadeFromBlackSeconds is { } startFadeSeconds)
         {
-            var max = GetStartFadeCap();
+            var max = ComputeStartFadeCap(kept, deletedRuns);
             if (startFadeSeconds < 0 || startFadeSeconds > max + 1e-9)
                 return new DomainError("InvalidStartFade", "Start fade exceeds the first kept section.");
         }
 
         if (Settings.FadeToBlackSeconds is { } endFadeSeconds)
         {
-            var max = GetEndFadeCap();
+            var max = ComputeEndFadeCap(kept, deletedRuns);
             if (endFadeSeconds < 0 || endFadeSeconds > max + 1e-9)
                 return new DomainError("InvalidEndFade", "End fade exceeds the final kept section.");
         }
@@ -479,9 +480,15 @@ public sealed class Timeline
             Settings.FadeToBlackSeconds);
     }
 
-    public TimeSpan GetCrossfadeCap(TimeRange deleted)
+    public TimeSpan GetCrossfadeCap(TimeRange deleted) =>
+        ComputeCrossfadeCap(deleted, GetKeptRuns());
+
+    public static TimeSpan GetCrossfadeCap(TimeRange deleted, ImmutableList<TimeRange> kept) =>
+        ComputeCrossfadeCap(deleted, kept);
+
+    private static TimeSpan ComputeCrossfadeCap(TimeRange deleted, ImmutableList<TimeRange> kept)
     {
-        var kept = GetKeptRuns();
+        ArgumentNullException.ThrowIfNull(kept);
         var beforeIndex = kept.FindLastIndex(k => k.End <= deleted.Start + MarkerEpsilon);
         var afterIndex = kept.FindIndex(k => k.Start >= deleted.End - MarkerEpsilon);
         if (beforeIndex < 0 || afterIndex < 0)
@@ -495,13 +502,26 @@ public sealed class Timeline
     /// </summary>
     public double GetStartFadeCap()
     {
-        var kept = GetKeptRuns();
+        var (kept, deleted) = GetKeptAndDeletedRuns();
+        return ComputeStartFadeCap(kept, deleted);
+    }
+
+    public static double GetStartFadeCap(
+        ImmutableList<TimeRange> kept,
+        ImmutableList<DeletedRun> deletedRuns) =>
+        ComputeStartFadeCap(kept, deletedRuns);
+
+    private static double ComputeStartFadeCap(
+        ImmutableList<TimeRange> kept,
+        ImmutableList<DeletedRun> deletedRuns)
+    {
+        ArgumentNullException.ThrowIfNull(kept);
+        ArgumentNullException.ThrowIfNull(deletedRuns);
         if (kept.Count == 0)
             return 0;
 
         var available = kept[0].Duration;
-
-        ImmutableList<DeletedRun> interiorDeleted = [.. GetDeletedRuns().Where(r => r.IsInterior)];
+        ImmutableList<DeletedRun> interiorDeleted = [.. deletedRuns.Where(r => r.IsInterior)];
         if (kept.Count >= 2 && interiorDeleted.Count >= 1)
         {
             var outgoing = interiorDeleted[0].Join;
@@ -518,13 +538,26 @@ public sealed class Timeline
     /// </summary>
     public double GetEndFadeCap()
     {
-        var kept = GetKeptRuns();
+        var (kept, deleted) = GetKeptAndDeletedRuns();
+        return ComputeEndFadeCap(kept, deleted);
+    }
+
+    public static double GetEndFadeCap(
+        ImmutableList<TimeRange> kept,
+        ImmutableList<DeletedRun> deletedRuns) =>
+        ComputeEndFadeCap(kept, deletedRuns);
+
+    private static double ComputeEndFadeCap(
+        ImmutableList<TimeRange> kept,
+        ImmutableList<DeletedRun> deletedRuns)
+    {
+        ArgumentNullException.ThrowIfNull(kept);
+        ArgumentNullException.ThrowIfNull(deletedRuns);
         if (kept.Count == 0)
             return 0;
 
         var available = kept[^1].Duration;
-
-        ImmutableList<DeletedRun> interiorDeleted = [.. GetDeletedRuns().Where(r => r.IsInterior)];
+        ImmutableList<DeletedRun> interiorDeleted = [.. deletedRuns.Where(r => r.IsInterior)];
         if (kept.Count >= 2 && interiorDeleted.Count >= kept.Count - 1)
         {
             var incoming = interiorDeleted[kept.Count - 2].Join;
@@ -541,7 +574,16 @@ public sealed class Timeline
     /// </summary>
     public ImmutableList<TimeRange> GetTransitionShadeRanges()
     {
-        var kept = GetKeptRuns();
+        var (kept, deleted) = GetKeptAndDeletedRuns();
+        return GetTransitionShadeRanges(kept, deleted);
+    }
+
+    public ImmutableList<TimeRange> GetTransitionShadeRanges(
+        ImmutableList<TimeRange> kept,
+        ImmutableList<DeletedRun> deletedRuns)
+    {
+        ArgumentNullException.ThrowIfNull(kept);
+        ArgumentNullException.ThrowIfNull(deletedRuns);
         if (kept.Count == 0)
             return [];
 
@@ -563,7 +605,7 @@ public sealed class Timeline
                 ranges.Add(new TimeRange(last.End - fade, last.End));
         }
 
-        foreach (var run in GetDeletedRuns())
+        foreach (var run in deletedRuns)
         {
             if (!run.IsInterior
                 || run.Join is not { Mode: TransitionMode.Crossfade, Crossfade: var crossfade }
@@ -706,6 +748,52 @@ public sealed class Timeline
         return ranges.ToImmutable();
     }
 
+    private (ImmutableList<TimeRange> Kept, ImmutableList<TimeRange> Deleted) CollectKeptAndDeletedRanges()
+    {
+        var boundaries = GetBoundaries();
+        var kept = ImmutableList.CreateBuilder<TimeRange>();
+        var deleted = ImmutableList.CreateBuilder<TimeRange>();
+        var i = 0;
+        while (i < Segments.Count)
+        {
+            var isDeleted = Segments[i].IsDeleted;
+            var startIndex = i;
+            while (i < Segments.Count && Segments[i].IsDeleted == isDeleted)
+                i++;
+
+            var range = new TimeRange(boundaries[startIndex], boundaries[i]);
+            if (isDeleted)
+                deleted.Add(range);
+            else
+                kept.Add(range);
+        }
+
+        return (kept.ToImmutable(), deleted.ToImmutable());
+    }
+
+    private ImmutableList<DeletedRun> ToDeletedRuns(ImmutableList<TimeRange> deletedRanges) =>
+        deletedRanges.Aggregate(
+            (Runs: ImmutableList<DeletedRun>.Empty, InteriorIndex: 0),
+            (state, range) =>
+            {
+                if (!range.IsInteriorOf(Duration))
+                {
+                    var edgeId = range.Covers(Duration)
+                        ? DeletedRunId.Full
+                        : range.TouchesStart
+                            ? DeletedRunId.Leading
+                            : DeletedRunId.Trailing;
+                    return (state.Runs.Add(new DeletedRun(edgeId, range, false, null)), state.InteriorIndex);
+                }
+
+                var join = state.InteriorIndex < Joins.Count
+                    ? Joins[state.InteriorIndex]
+                    : new JoinTransition(DeletedRunId.New(), TransitionMode.HardCut, TimeSpan.Zero);
+                return (
+                    state.Runs.Add(new DeletedRun(join.DeletedRunId, range, true, join)),
+                    state.InteriorIndex + 1);
+            }).Runs;
+
     private static Timeline Rebuild(
         TimeSpan duration,
         ImmutableList<Marker> markers,
@@ -716,9 +804,10 @@ public sealed class Timeline
         var probe = new Timeline(
             duration, markers, segments, [], settings);
 
+        var (kept, deletedRanges) = probe.CollectKeptAndDeletedRanges();
         ImmutableList<TimeRange> newRanges =
         [
-            .. probe.CollectDeletedRanges().Where(r => r.IsInteriorOf(duration))
+            .. deletedRanges.Where(r => r.IsInteriorOf(duration))
         ];
 
         ImmutableList<JoinTransition> newJoins =
@@ -742,7 +831,7 @@ public sealed class Timeline
                 if (join.Mode != TransitionMode.Crossfade)
                     return join;
 
-                var cap = probe.GetCrossfadeCap(range);
+                var cap = ComputeCrossfadeCap(range, kept);
                 if (cap <= TimeSpan.Zero || join.Crossfade <= TimeSpan.Zero)
                     return join with { Mode = TransitionMode.HardCut, Crossfade = TimeSpan.Zero };
                 if (join.Crossfade > cap)
@@ -751,18 +840,22 @@ public sealed class Timeline
             })
         ];
 
-        settings = ClampSettings(probe, settings);
+        var withJoins = new Timeline(duration, markers, segments, newJoins, settings);
+        settings = ClampSettings(kept, withJoins.ToDeletedRuns(deletedRanges), settings);
         return new Timeline(duration, markers, segments, newJoins, settings);
     }
 
-    private static ProjectSettings ClampSettings(Timeline probe, ProjectSettings settings)
+    private static ProjectSettings ClampSettings(
+        ImmutableList<TimeRange> kept,
+        ImmutableList<DeletedRun> deletedRuns,
+        ProjectSettings settings)
     {
         double? startSeconds = settings.FadeFromBlackSeconds;
         double? endSeconds = settings.FadeToBlackSeconds;
 
         if (startSeconds is { } start)
         {
-            var max = probe.GetStartFadeCap();
+            var max = ComputeStartFadeCap(kept, deletedRuns);
             if (max <= 0)
                 startSeconds = null;
             else if (start > max)
@@ -771,7 +864,7 @@ public sealed class Timeline
 
         if (endSeconds is { } end)
         {
-            var max = probe.GetEndFadeCap();
+            var max = ComputeEndFadeCap(kept, deletedRuns);
             if (max <= 0)
                 endSeconds = null;
             else if (end > max)

@@ -245,9 +245,10 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             FadeFromBlackSeconds = value.Settings.FadeFromBlackSeconds ?? 0;
-            StartFadeCap = value.GetStartFadeCap();
             FadeToBlackSeconds = value.Settings.FadeToBlackSeconds ?? 0;
-            EndFadeCap = value.GetEndFadeCap();
+            var (kept, deleted) = value.GetKeptAndDeletedRuns();
+            StartFadeCap = Timeline.GetStartFadeCap(kept, deleted);
+            EndFadeCap = Timeline.GetEndFadeCap(kept, deleted);
         }
         finally
         {
@@ -2809,7 +2810,8 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var run = Timeline.GetDeletedRuns().FirstOrDefault(r => r.Id == SelectedDeletedRunId);
+        var (kept, deletedRuns) = Timeline.GetKeptAndDeletedRuns();
+        var run = deletedRuns.FirstOrDefault(r => r.Id == SelectedDeletedRunId);
         if (run is null)
         {
             SelectedDeletedRunId = null;
@@ -2829,7 +2831,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             SelectedCrossfadeSeconds = run.Join.Mode == TransitionMode.Crossfade
                 ? run.Join.Crossfade.TotalSeconds
                 : 0;
-            SelectedCrossfadeCap = Timeline.GetCrossfadeCap(run.Range).TotalSeconds;
+            SelectedCrossfadeCap = Timeline.GetCrossfadeCap(run.Range, kept).TotalSeconds;
         }
         finally
         {
