@@ -9,7 +9,7 @@ Canonical docs: README → **Releases**, workflow `.github/workflows/release.yml
 
 1. While working, append bullets under `## [Unreleased]` in `CHANGELOG.md` **only when the change affects the user** (behavior, UI, packaging, docs they read, load/save compatibility, etc.). Skip the changelog for internal refactors, renames, test-only work, agent rules, and other non-user-visible edits.
 2. To publish: rename that section to `## [x.y.z] - YYYY-MM-DD`, update compare links at the bottom if needed, and tell the user to push to `main`.
-3. CI reads the latest **versioned** changelog entry; if GitHub Release `v`+version does not exist, it tests, publishes win-x64 zip, creates the Release, then packs/pushes Chocolatey `videoabridge` (`CHOCOLATEY_API_KEY` secret; sources under `packaging/chocolatey/`).
-4. To publish Chocolatey for an existing Release only: `workflow_dispatch` with `chocolatey_only_version` (no new changelog cut).
+3. CI reads the latest **versioned** changelog entry; if GitHub Release `v`+version does not exist, it tests, publishes win-x64 zip, and creates the Release. Normal releases do **not** push Chocolatey.
+4. To publish Chocolatey for an existing Release: `workflow_dispatch` with `chocolatey_only_version` (`CHOCOLATEY_API_KEY` secret; sources under `packaging/chocolatey/`).
 
 Do **not** invent alternate triggers (commit labels, manual tags) unless the docs change. Do **not** commit or push the release yourself (see no-git-commit-push rule).

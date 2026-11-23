@@ -7,11 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2026.11.8] - 2026-11-23
+
 ### Added
 
 - Edit → Move Marker to Playhead (`Ctrl+M`): with 1–2 markers selected, moves the nearest manual marker to the playhead when playback is stopped and the move stays legal (including existing crossfade / edge-fade caps).
 - File Explorer **Abridge...** context menu for video files (Chocolatey registers it by default; `/NoExplorerContextMenu` skips). Help → Add/Remove File Explorer context menu toggles it for the current user.
-- Chocolatey package `videoabridge` (downloads the GitHub Release zip; depends on `ffmpeg`); release workflow packs and pushes it via `CHOCOLATEY_API_KEY`.
+- Chocolatey package `videoabridge` (downloads the GitHub Release zip; depends on `ffmpeg`); publish separately via Release `workflow_dispatch` **chocolatey_only_version** (`CHOCOLATEY_API_KEY`). Normal GitHub Releases no longer push Chocolatey.
 - MIT `LICENSE`.
 - Edit mode: darker green shading on kept sections that participate in a crossfade or edge fade.
 
@@ -114,7 +116,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial GitHub Release of VideoAbridge: open a single finished video, mark and delete sections, scene detection, multiple abridged versions, Edit/Preview modes, joins/fades, undo/redo, marker cache, and FFmpeg export.
 - CI release workflow publishing a self-contained Windows x64 build zip.
 
-[Unreleased]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.7...HEAD
+[Unreleased]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.8...HEAD
+[2026.11.8]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.7...v2026.11.8
 [2026.11.7]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.6...v2026.11.7
 [2026.11.6]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.5...v2026.11.6
 [2026.11.5]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.4...v2026.11.5

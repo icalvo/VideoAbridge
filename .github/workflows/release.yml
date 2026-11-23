@@ -101,7 +101,7 @@ jobs:
           } > "$RUNNER_TEMP/release-body.md"
 
           echo "should_release=true" >> "$GITHUB_OUTPUT"
-          echo "publish_chocolatey=true" >> "$GITHUB_OUTPUT"
+          echo "publish_chocolatey=false" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "notes_path=$RUNNER_TEMP/release-body.md" >> "$GITHUB_OUTPUT"

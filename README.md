@@ -114,9 +114,9 @@ Requires [Chocolatey](https://chocolatey.org/). The package depends on the Choco
 
 Notable changes live in [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)). While working, append bullets under **Unreleased**. To publish, rename that section to a version (`## [x.y.z] - YYYY-MM-DD`) and push to `main`.
 
-[.github/workflows/release.yml](.github/workflows/release.yml) reads the latest versioned changelog entry; if that GitHub Release does not exist yet, it runs tests, publishes a self-contained `win-x64` build, creates the Release (`v` + version) with a zip asset, then packs and pushes the [Chocolatey](https://community.chocolatey.org/) package `videoabridge` (needs repo secret `CHOCOLATEY_API_KEY`). The first Chocolatey submission is moderated; later versions publish automatically after that.
+[.github/workflows/release.yml](.github/workflows/release.yml) reads the latest versioned changelog entry; if that GitHub Release does not exist yet, it runs tests, publishes a self-contained `win-x64` build, and creates the Release (`v` + version) with a zip asset. Normal releases do **not** push Chocolatey.
 
-To push Chocolatey for an **existing** GitHub Release without cutting a new app version, run the Release workflow manually (`workflow_dispatch`) and set **chocolatey_only_version** (e.g. `2026.11.7`).
+To publish the [Chocolatey](https://community.chocolatey.org/) package `videoabridge` for an existing GitHub Release, run the Release workflow manually (`workflow_dispatch`) and set **chocolatey_only_version** (e.g. `2026.11.8`). That path needs repo secret `CHOCOLATEY_API_KEY`. The first Chocolatey submission is moderated; later versions publish automatically after that.
 
 Package sources live under [`packaging/chocolatey/`](packaging/chocolatey/).
 
