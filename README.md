@@ -1,5 +1,7 @@
 # VideoAbridge
 
+[![Chocolatey](https://img.shields.io/chocolatey/v/videoabridge)](https://community.chocolatey.org/packages/videoabridge)
+
 ![VideoAbridge](docs/readme-screenshot.png)
 
 **Mission:** make it easy to produce short versions of a **single, already edited** video.
