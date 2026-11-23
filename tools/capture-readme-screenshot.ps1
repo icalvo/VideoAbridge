@@ -1,7 +1,7 @@
-#Requires -Version 7
+﻿#Requires -Version 7
 <#
 .SYNOPSIS
-  Builds VideoAbridge, generates a sample fixture MP4, and captures docs/readme-screenshot.png.
+  Builds VideoAbridge, composes a sample fixture MP4 from CC0 stills, and captures docs/readme-screenshot.png.
 #>
 [CmdletBinding()]
 param(
@@ -23,14 +23,45 @@ Require-Command ffprobe
 
 $fixturesDir = Join-Path $repoRoot 'tools\fixtures'
 $sampleMp4 = Join-Path $fixturesDir 'readme-sample.mp4'
+$stillsDir = Join-Path $repoRoot 'tools\readme-sample\images'
+$stills = @(
+    (Join-Path $stillsDir '01-valley-flowers.jpg'),
+    (Join-Path $stillsDir '02-landscape-clouds.jpg'),
+    (Join-Path $stillsDir '03-city-skyline.jpg'),
+    (Join-Path $stillsDir '04-mountains.jpg')
+)
 New-Item -ItemType Directory -Force -Path $fixturesDir | Out-Null
 
+foreach ($still in $stills) {
+    if (-not (Test-Path -LiteralPath $still)) {
+        throw "Missing README sample still: $still (see tools/readme-sample/ATTRIBUTION.md)."
+    }
+}
+
 if ($ForceFixture -or -not (Test-Path $sampleMp4)) {
-    Write-Host "Generating $sampleMp4 ..."
+    Write-Host "Generating $sampleMp4 from CC0 stills..."
+    # Four scenes with 0.5s crossfades. Hold 3.0s each → output ~10.5s
+    # (4*3 - 3*0.5). Letterbox/pillarbox to 1280x720.
+    $prep = "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p"
+    $vf = @(
+        "[0:v]$prep[v0]"
+        "[1:v]$prep[v1]"
+        "[2:v]$prep[v2]"
+        "[3:v]$prep[v3]"
+        "[v0][v1]xfade=transition=fade:duration=0.5:offset=2.5[x01]"
+        "[x01][v2]xfade=transition=fade:duration=0.5:offset=5.0[x02]"
+        "[x02][v3]xfade=transition=fade:duration=0.5:offset=7.5[vout]"
+    ) -join ';'
+
     & ffmpeg -y -hide_banner -loglevel error `
-        -f lavfi -i "smptehdbars=size=1280x720:rate=30" `
-        -f lavfi -i "sine=frequency=440:sample_rate=44100" `
-        -t 10 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest `
+        -loop 1 -t 3 -i $stills[0] `
+        -loop 1 -t 3 -i $stills[1] `
+        -loop 1 -t 3 -i $stills[2] `
+        -loop 1 -t 3 -i $stills[3] `
+        -f lavfi -i "sine=frequency=220:sample_rate=44100:duration=11" `
+        -filter_complex $vf `
+        -map '[vout]' -map '4:a' `
+        -t 10.5 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest `
         $sampleMp4
     if ($LASTEXITCODE -ne 0) {
         throw "ffmpeg failed to generate the sample fixture."

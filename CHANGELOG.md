@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- README hero sample clip is composed from CC0 stills (see `tools/readme-sample/`) instead of SMPTE color bars.
+
 ## [2026.11.8] - 2026-11-23
 
 ### Added

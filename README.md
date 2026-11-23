@@ -95,7 +95,7 @@ dotnet test tests/VideoAbridge.FFmpeg.Tests/VideoAbridge.FFmpeg.Tests.csproj
 
 ## README screenshot
 
-The hero image is captured automatically on **Windows** before `git push` (markers + one deleted section on a generated sample clip).
+The hero image is captured automatically on **Windows** before `git push` (markers + one deleted section on a sample clip composed from [CC0 stills](tools/readme-sample/ATTRIBUTION.md)).
 
 ```powershell
 pwsh tools/install-hooks.ps1          # once per clone: core.hooksPath=.githooks
