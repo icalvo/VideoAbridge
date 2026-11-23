@@ -5,10 +5,11 @@
              Background="#1E1E1E"
              Focusable="True"
              FocusVisualStyle="{x:Null}">
-    <!-- Vertical=Hidden (not Disabled): Disabled can prevent the horizontal bar from appearing. -->
+    <!-- Overlay scrollbar: showing/hiding it must not change viewport size or zoom. -->
     <ScrollViewer x:Name="Scroller"
+                  Style="{StaticResource OverlayHorizontalScrollViewer}"
                   HorizontalScrollBarVisibility="Auto"
-                  VerticalScrollBarVisibility="Hidden"
+                  VerticalScrollBarVisibility="Disabled"
                   PreviewMouseWheel="OnPreviewMouseWheel">
         <Canvas x:Name="RootCanvas"
                 Height="160"

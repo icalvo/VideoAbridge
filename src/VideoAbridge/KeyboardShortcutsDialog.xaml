@@ -127,6 +127,7 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     <TextBlock Grid.Row="0" Grid.Column="0" Text="Undo" Style="{StaticResource ShortcutAction}"/>
                     <TextBlock Grid.Row="0" Grid.Column="1" Text="Ctrl+Z" Style="{StaticResource ShortcutKeys}"/>
@@ -134,20 +135,22 @@
                     <TextBlock Grid.Row="1" Grid.Column="1" Text="Ctrl+Y" Style="{StaticResource ShortcutKeys}"/>
                     <TextBlock Grid.Row="2" Grid.Column="0" Text="Add Marker" Style="{StaticResource ShortcutAction}"/>
                     <TextBlock Grid.Row="2" Grid.Column="1" Text="M" Style="{StaticResource ShortcutKeys}"/>
-                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Delete Marker / Section" Style="{StaticResource ShortcutAction}"/>
-                    <TextBlock Grid.Row="3" Grid.Column="1" Text="Delete" Style="{StaticResource ShortcutKeys}"/>
-                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Restore Section" Style="{StaticResource ShortcutAction}"/>
-                    <TextBlock Grid.Row="4" Grid.Column="1" Text="Shift+Delete" Style="{StaticResource ShortcutKeys}"/>
-                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Delete Section from Start" Style="{StaticResource ShortcutAction}"/>
-                    <TextBlock Grid.Row="5" Grid.Column="1" Text="Ctrl+Home" Style="{StaticResource ShortcutKeys}"/>
-                    <TextBlock Grid.Row="6" Grid.Column="0" Text="Delete Section to End" Style="{StaticResource ShortcutAction}"/>
-                    <TextBlock Grid.Row="6" Grid.Column="1" Text="Ctrl+End" Style="{StaticResource ShortcutKeys}"/>
-                    <TextBlock Grid.Row="7" Grid.Column="0" Text="Restore Section from Start" Style="{StaticResource ShortcutAction}"/>
-                    <TextBlock Grid.Row="7" Grid.Column="1" Text="Ctrl+Shift+Home" Style="{StaticResource ShortcutKeys}"/>
-                    <TextBlock Grid.Row="8" Grid.Column="0" Text="Restore Section to End" Style="{StaticResource ShortcutAction}"/>
-                    <TextBlock Grid.Row="8" Grid.Column="1" Text="Ctrl+Shift+End" Style="{StaticResource ShortcutKeys}"/>
-                    <TextBlock Grid.Row="9" Grid.Column="0" Text="Detect Scenes" Style="{StaticResource ShortcutAction}"/>
-                    <TextBlock Grid.Row="9" Grid.Column="1" Text="Ctrl+D" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Move Marker to Playhead" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="3" Grid.Column="1" Text="Ctrl+M" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Delete Marker / Section" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="4" Grid.Column="1" Text="Delete" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Restore Section" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="5" Grid.Column="1" Text="Shift+Delete" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="6" Grid.Column="0" Text="Delete Section from Start" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="6" Grid.Column="1" Text="Ctrl+Home" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="7" Grid.Column="0" Text="Delete Section to End" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="7" Grid.Column="1" Text="Ctrl+End" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="8" Grid.Column="0" Text="Restore Section from Start" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="8" Grid.Column="1" Text="Ctrl+Shift+Home" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="9" Grid.Column="0" Text="Restore Section to End" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="9" Grid.Column="1" Text="Ctrl+Shift+End" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="10" Grid.Column="0" Text="Detect Scenes" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="10" Grid.Column="1" Text="Ctrl+D" Style="{StaticResource ShortcutKeys}"/>
                 </Grid>
             </StackPanel>
 

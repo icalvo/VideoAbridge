@@ -48,13 +48,13 @@ public readonly record struct PreviewVisualState(
             var clip = clips[i];
             var outgoingXf = i < plan.JoinsBetweenClips.Count
                 && plan.JoinsBetweenClips[i].Mode == TransitionMode.Crossfade
-                && plan.JoinsBetweenClips[i].CrossfadeSeconds > 0
-                    ? plan.JoinsBetweenClips[i].CrossfadeSeconds
+                && plan.JoinsBetweenClips[i].Crossfade > TimeSpan.Zero
+                    ? plan.JoinsBetweenClips[i].Crossfade.TotalSeconds
                     : 0;
             var incomingXf = i > 0
                 && plan.JoinsBetweenClips[i - 1].Mode == TransitionMode.Crossfade
-                && plan.JoinsBetweenClips[i - 1].CrossfadeSeconds > 0
-                    ? plan.JoinsBetweenClips[i - 1].CrossfadeSeconds
+                && plan.JoinsBetweenClips[i - 1].Crossfade > TimeSpan.Zero
+                    ? plan.JoinsBetweenClips[i - 1].Crossfade.TotalSeconds
                     : 0;
 
             var clipStart = clip.Start.TotalSeconds;

@@ -1,6 +1,6 @@
 namespace VideoAbridge.Core.Editing;
 
 public sealed record JoinTransition(
-    Guid DeletedRunId,
+    DeletedRunId DeletedRunId,
     TransitionMode Mode,
-    double CrossfadeSeconds);
+    TimeSpan Crossfade);

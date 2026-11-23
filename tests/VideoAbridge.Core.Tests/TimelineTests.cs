@@ -35,8 +35,8 @@ public class TimelineTests
         var error = Timeline.FromPersistedState(
                 TimeSpan.FromSeconds(60),
                 [
-                    new Marker(Guid.NewGuid(), TimeSpan.FromSeconds(30), MarkerSource.User),
-                    new Marker(Guid.NewGuid(), TimeSpan.FromSeconds(60), MarkerSource.User)
+                    new Marker(MarkerId.New(), TimeSpan.FromSeconds(30), MarkerSource.User),
+                    new Marker(MarkerId.New(), TimeSpan.FromSeconds(60), MarkerSource.User)
                 ],
                 [false, false, false],
                 [],
@@ -51,7 +51,7 @@ public class TimelineTests
     {
         var error = Timeline.FromPersistedState(
                 TimeSpan.FromSeconds(60),
-                [new Marker(Guid.NewGuid(), TimeSpan.Zero, MarkerSource.User)],
+                [new Marker(MarkerId.New(), TimeSpan.Zero, MarkerSource.User)],
                 [false, false],
                 [],
                 ProjectSettings.Default)
@@ -66,11 +66,11 @@ public class TimelineTests
         var timeline = Timeline.FromPersistedState(
                 TimeSpan.FromSeconds(60),
                 [
-                    new Marker(Guid.NewGuid(), TimeSpan.FromSeconds(10), MarkerSource.User),
-                    new Marker(Guid.NewGuid(), TimeSpan.FromSeconds(50), MarkerSource.SceneDetect)
+                    new Marker(MarkerId.New(), TimeSpan.FromSeconds(10), MarkerSource.User),
+                    new Marker(MarkerId.New(), TimeSpan.FromSeconds(50), MarkerSource.SceneDetect)
                 ],
                 [false, true, false],
-                [new JoinTransition(Guid.NewGuid(), TransitionMode.HardCut, 0)],
+                [new JoinTransition(DeletedRunId.New(), TransitionMode.HardCut, TimeSpan.Zero)],
                 ProjectSettings.Default)
             .RequireOk();
 
@@ -101,6 +101,126 @@ public class TimelineTests
     }
 
     [Fact]
+    public void MoveMarkerUpdatesTimeWithinNeighborsAndPreservesId()
+    {
+        var timeline = CreateWithMarkers(10, 30, 50);
+        var id = timeline.Markers[1].Id;
+
+        var moved = timeline.MoveMarker(id, TimeSpan.FromSeconds(40)).RequireOk();
+
+        moved.Markers[1].Id.Should().Be(id);
+        moved.Markers[1].Time.Should().Be(TimeSpan.FromSeconds(40));
+        moved.Markers.Select(m => m.Id).Should().Equal(timeline.Markers.Select(m => m.Id));
+        moved.CanMoveMarker(id, TimeSpan.FromSeconds(40)).Should().BeTrue();
+        moved.GetMoveMarkerBlockReason(id, TimeSpan.FromSeconds(40)).Should().BeNull();
+    }
+
+    [Fact]
+    public void MoveMarkerAllowsKeepDeleteBoundaryWithinNeighbors()
+    {
+        var timeline = CreateWithMarkers(10, 30, 50);
+        timeline = timeline.DeleteBetween(timeline.Markers[0].Id, timeline.Markers[1].Id).RequireOk();
+        var boundaryId = timeline.Markers[1].Id;
+
+        var moved = timeline.MoveMarker(boundaryId, TimeSpan.FromSeconds(40)).RequireOk();
+
+        moved.Markers[1].Time.Should().Be(TimeSpan.FromSeconds(40));
+        moved.GetDeletedRuns().Should().ContainSingle()
+            .Which.Range.End.Should().Be(TimeSpan.FromSeconds(40));
+    }
+
+    [Fact]
+    public void MoveMarkerFailsWhenCrossingNeighbor()
+    {
+        var timeline = CreateWithMarkers(10, 30, 50);
+        var error = timeline.MoveMarker(timeline.Markers[1].Id, TimeSpan.FromSeconds(55)).RequireError();
+        error.Code.Should().Be("MarkerTooClose");
+        timeline.CanMoveMarker(timeline.Markers[1].Id, TimeSpan.FromSeconds(55)).Should().BeFalse();
+    }
+
+    [Fact]
+    public void MoveMarkerFailsWhenTooCloseToNeighbor()
+    {
+        var timeline = CreateWithMarkers(10, 30, 50);
+        var error = timeline.MoveMarker(
+                timeline.Markers[1].Id,
+                TimeSpan.FromSeconds(50) - Timeline.MarkerEpsilon)
+            .RequireError();
+        error.Code.Should().Be("MarkerTooClose");
+    }
+
+    [Fact]
+    public void MoveMarkerFailsWhenOutOfRange()
+    {
+        var timeline = CreateWithMarkers(10);
+        var error = timeline.MoveMarker(timeline.Markers[0].Id, TimeSpan.Zero).RequireError();
+        error.Code.Should().Be("MarkerOutOfRange");
+    }
+
+    [Fact]
+    public void MoveMarkerNoOpWhenAlreadyAtTime()
+    {
+        var timeline = CreateWithMarkers(10, 30);
+        var same = timeline.MoveMarker(timeline.Markers[0].Id, TimeSpan.FromSeconds(10)).RequireOk();
+        same.Should().BeSameAs(timeline);
+    }
+
+    [Fact]
+    public void MoveMarkerFailsWhenItWouldBreakCrossfade()
+    {
+        // keep 0-5 (5s), delete 5-10, keep 10-100 → crossfade cap 5
+        var timeline = CreateWithMarkers(5, 10);
+        timeline = timeline.DeleteBetween(timeline.Markers[0].Id, timeline.Markers[1].Id).RequireOk();
+        var del = timeline.GetDeletedRuns().Single(r => r.IsInterior);
+        timeline = timeline.SetJoinCrossfade(del.Id, TimeSpan.FromSeconds(4.0)).RequireOk();
+
+        // Move left boundary toward start → first kept becomes 3s < 4s crossfade
+        var error = timeline.MoveMarker(timeline.Markers[0].Id, TimeSpan.FromSeconds(3)).RequireError();
+        error.Code.Should().Be("CrossfadeOutOfRange");
+    }
+
+    [Fact]
+    public void MoveMarkerFailsWhenItWouldBreakStartFade()
+    {
+        // keep 0-10, delete 10-20, keep 20-100 → start-fade cap is first kept (10s)
+        var timeline = CreateWithMarkers(10, 20);
+        timeline = timeline.DeleteBetween(timeline.Markers[0].Id, timeline.Markers[1].Id).RequireOk();
+        timeline = timeline.SetStartFade(8.0).RequireOk();
+
+        // Move left boundary left → first kept becomes 5s < 8s start fade
+        var error = timeline.MoveMarker(timeline.Markers[0].Id, TimeSpan.FromSeconds(5)).RequireError();
+        error.Code.Should().Be("StartFadeOutOfRange");
+    }
+
+    [Fact]
+    public void MoveMarkerFailsWhenItWouldBreakEndFade()
+    {
+        // keep 0-80, delete 80-90, keep 90-100 → end-fade cap is last kept (10s)
+        var timeline = CreateWithMarkers(80, 90);
+        timeline = timeline.DeleteBetween(timeline.Markers[0].Id, timeline.Markers[1].Id).RequireOk();
+        timeline = timeline.SetEndFade(8.0).RequireOk();
+
+        // Move right boundary right → last kept becomes 5s < 8s end fade
+        var error = timeline.MoveMarker(timeline.Markers[1].Id, TimeSpan.FromSeconds(95)).RequireError();
+        error.Code.Should().Be("EndFadeOutOfRange");
+    }
+
+    [Fact]
+    public void MoveMarkerSucceedsWhenTransitionsStillFit()
+    {
+        var timeline = CreateWithMarkers(5, 10);
+        timeline = timeline.DeleteBetween(timeline.Markers[0].Id, timeline.Markers[1].Id).RequireOk();
+        var del = timeline.GetDeletedRuns().Single(r => r.IsInterior);
+        timeline = timeline.SetJoinCrossfade(del.Id, TimeSpan.FromSeconds(2.0)).RequireOk();
+        timeline = timeline.SetStartFade(1.0).RequireOk();
+
+        var moved = timeline.MoveMarker(timeline.Markers[0].Id, TimeSpan.FromSeconds(4)).RequireOk();
+        moved.Markers[0].Time.Should().Be(TimeSpan.FromSeconds(4));
+        moved.Joins[0].Crossfade.Should().Be(TimeSpan.FromSeconds(2.0));
+        moved.Settings.FadeFromBlackSeconds.Should().Be(1.0);
+    }
+
+    [Fact]
     public void RemoveMarkerFailsOnKeepDeleteBoundary()
     {
         var timeline = CreateWithMarkers(10, 20);
@@ -128,9 +248,9 @@ public class TimelineTests
         var timeline = CreateWithMarkers(10, 20, 30);
         var result = timeline.DeleteBetween(timeline.Markers[0].Id, timeline.Markers[1].Id).RequireOk();
 
-        var runs = result.GetDeletedRuns();
-        runs.Should().ContainSingle(r => r.IsInterior);
-        runs[0].Join!.Mode.Should().Be(TransitionMode.HardCut);
+        var join = result.GetDeletedRuns().Should().ContainSingle(r => r.IsInterior).Subject.Join;
+        join.Should().NotBeNull();
+        join.Mode.Should().Be(TransitionMode.HardCut);
     }
 
     [Fact]
@@ -140,12 +260,12 @@ public class TimelineTests
         var left = timeline.Markers[0].Id;
         var right = timeline.Markers[1].Id;
 
-        timeline.RangeContainsSegment(Timeline.StartBoundId, left, isDeleted: false).Should().BeTrue();
-        timeline.RangeContainsSegment(Timeline.StartBoundId, left, isDeleted: true).Should().BeFalse();
+        timeline.RangeContainsSegment(MarkerId.StartBound, left, isDeleted: false).Should().BeTrue();
+        timeline.RangeContainsSegment(MarkerId.StartBound, left, isDeleted: true).Should().BeFalse();
 
-        timeline = timeline.DeleteBetween(Timeline.StartBoundId, left).RequireOk();
-        timeline.RangeContainsSegment(Timeline.StartBoundId, left, isDeleted: false).Should().BeFalse();
-        timeline.RangeContainsSegment(Timeline.StartBoundId, left, isDeleted: true).Should().BeTrue();
+        timeline = timeline.DeleteBetween(MarkerId.StartBound, left).RequireOk();
+        timeline.RangeContainsSegment(MarkerId.StartBound, left, isDeleted: false).Should().BeFalse();
+        timeline.RangeContainsSegment(MarkerId.StartBound, left, isDeleted: true).Should().BeTrue();
         timeline.RangeContainsSegment(left, right, isDeleted: false).Should().BeTrue();
     }
 
@@ -156,7 +276,7 @@ public class TimelineTests
         // Del1 between 10-20 with crossfade, Del2 between 30-40 hard cut, keep 20-30
         timeline = timeline.DeleteBetween(timeline.Markers[0].Id, timeline.Markers[1].Id).RequireOk();
         var del1 = timeline.GetDeletedRuns().Single(r => r.IsInterior);
-        timeline = timeline.SetJoinCrossfade(del1.Id, 1.0).RequireOk();
+        timeline = timeline.SetJoinCrossfade(del1.Id, TimeSpan.FromSeconds(1.0)).RequireOk();
 
         timeline = timeline.DeleteBetween(timeline.Markers[2].Id, timeline.Markers[3].Id).RequireOk();
         timeline.Joins.Should().HaveCount(2);
@@ -166,7 +286,7 @@ public class TimelineTests
         timeline = timeline.DeleteBetween(timeline.Markers[1].Id, timeline.Markers[2].Id).RequireOk();
         timeline.Joins.Should().ContainSingle();
         timeline.Joins[0].Mode.Should().Be(TransitionMode.HardCut);
-        timeline.Joins[0].CrossfadeSeconds.Should().Be(0);
+        timeline.Joins[0].Crossfade.Should().Be(TimeSpan.FromSeconds(0));
     }
 
     [Fact]
@@ -175,14 +295,14 @@ public class TimelineTests
         var timeline = CreateWithMarkers(10, 20, 30, 40);
         timeline = timeline.DeleteBetween(timeline.Markers[0].Id, timeline.Markers[1].Id).RequireOk();
         var del = timeline.GetDeletedRuns().Single(r => r.IsInterior);
-        timeline = timeline.SetJoinCrossfade(del.Id, 2.0).RequireOk();
+        timeline = timeline.SetJoinCrossfade(del.Id, TimeSpan.FromSeconds(2.0)).RequireOk();
 
         // Expand into next keep segment 20-30
         timeline = timeline.DeleteBetween(timeline.Markers[1].Id, timeline.Markers[2].Id).RequireOk();
         timeline.Joins.Should().ContainSingle();
         timeline.Joins[0].Mode.Should().Be(TransitionMode.Crossfade);
         timeline.Joins[0].DeletedRunId.Should().Be(del.Id);
-        timeline.Joins[0].CrossfadeSeconds.Should().Be(2.0);
+        timeline.Joins[0].Crossfade.Should().Be(TimeSpan.FromSeconds(2.0));
     }
 
     [Fact]
@@ -192,7 +312,7 @@ public class TimelineTests
         // One deleted run covering 10-40
         timeline = timeline.DeleteBetween(timeline.Markers[0].Id, timeline.Markers[3].Id).RequireOk();
         var del = timeline.GetDeletedRuns().Single(r => r.IsInterior);
-        timeline = timeline.SetJoinCrossfade(del.Id, 1.0).RequireOk();
+        timeline = timeline.SetJoinCrossfade(del.Id, TimeSpan.FromSeconds(1.0)).RequireOk();
 
         // Restore middle 20-30 → two deleted runs (10-20 and 30-40)
         timeline = timeline.RestoreBetween(timeline.Markers[1].Id, timeline.Markers[2].Id).RequireOk();
@@ -208,17 +328,17 @@ public class TimelineTests
         timeline = timeline.DeleteBetween(timeline.Markers[0].Id, timeline.Markers[1].Id).RequireOk();
         var del = timeline.GetDeletedRuns().Single(r => r.IsInterior);
 
-        var fail = timeline.SetJoinCrossfade(del.Id, 6.0).RequireError();
+        var fail = timeline.SetJoinCrossfade(del.Id, TimeSpan.FromSeconds(6.0)).RequireError();
         fail.Code.Should().Be("CrossfadeOutOfRange");
 
-        timeline.SetJoinCrossfade(del.Id, 5.0).RequireOk();
+        timeline.SetJoinCrossfade(del.Id, TimeSpan.FromSeconds(5.0)).RequireOk();
     }
 
     [Fact]
     public void LeadingDeleteHasNoJoin()
     {
         var timeline = CreateWithMarkers(10, 20);
-        timeline = timeline.DeleteBetween(Timeline.StartBoundId, timeline.Markers[0].Id).RequireOk();
+        timeline = timeline.DeleteBetween(MarkerId.StartBound, timeline.Markers[0].Id).RequireOk();
         timeline.Joins.Should().BeEmpty();
         timeline.GetDeletedRuns().Single().IsInterior.Should().BeFalse();
     }
@@ -227,13 +347,13 @@ public class TimelineTests
     public void EdgeDeletedRunsHaveStableIds()
     {
         var timeline = CreateWithMarkers(10, 20, 30);
-        timeline = timeline.DeleteBetween(Timeline.StartBoundId, timeline.Markers[0].Id).RequireOk();
-        timeline = timeline.DeleteBetween(timeline.Markers[2].Id, Timeline.EndBoundId).RequireOk();
+        timeline = timeline.DeleteBetween(MarkerId.StartBound, timeline.Markers[0].Id).RequireOk();
+        timeline = timeline.DeleteBetween(timeline.Markers[2].Id, MarkerId.EndBound).RequireOk();
 
         var runs = timeline.GetDeletedRuns().Where(r => !r.IsInterior).ToList();
         runs.Should().HaveCount(2);
-        runs.Should().ContainSingle(r => r.Id == Timeline.LeadingDeletedRunId);
-        runs.Should().ContainSingle(r => r.Id == Timeline.TrailingDeletedRunId);
+        runs.Should().ContainSingle(r => r.Id == DeletedRunId.Leading);
+        runs.Should().ContainSingle(r => r.Id == DeletedRunId.Trailing);
 
         // IDs stay stable across repeated queries.
         timeline.GetDeletedRuns().Select(r => r.Id).Should().BeEquivalentTo(
@@ -244,13 +364,13 @@ public class TimelineTests
     public void RestoreDeletedRunRestoresLeadingAndTrailing()
     {
         var timeline = CreateWithMarkers(10, 20, 30);
-        timeline = timeline.DeleteBetween(Timeline.StartBoundId, timeline.Markers[0].Id).RequireOk();
-        timeline = timeline.DeleteBetween(timeline.Markers[2].Id, Timeline.EndBoundId).RequireOk();
+        timeline = timeline.DeleteBetween(MarkerId.StartBound, timeline.Markers[0].Id).RequireOk();
+        timeline = timeline.DeleteBetween(timeline.Markers[2].Id, MarkerId.EndBound).RequireOk();
 
-        timeline = timeline.RestoreDeletedRun(Timeline.LeadingDeletedRunId).RequireOk();
-        timeline.GetDeletedRuns().Should().ContainSingle(r => r.Id == Timeline.TrailingDeletedRunId);
+        timeline = timeline.RestoreDeletedRun(DeletedRunId.Leading).RequireOk();
+        timeline.GetDeletedRuns().Should().ContainSingle(r => r.Id == DeletedRunId.Trailing);
 
-        timeline = timeline.RestoreDeletedRun(Timeline.TrailingDeletedRunId).RequireOk();
+        timeline = timeline.RestoreDeletedRun(DeletedRunId.Trailing).RequireOk();
         timeline.GetDeletedRuns().Should().BeEmpty();
         timeline.Segments.Should().OnlyContain(s => !s.IsDeleted);
     }
@@ -259,7 +379,7 @@ public class TimelineTests
     public void TryBuildExportPlanFailsWhenEverythingDeleted()
     {
         var timeline = CreateWithMarkers(10);
-        timeline = timeline.DeleteBetween(Timeline.StartBoundId, Timeline.EndBoundId).RequireOk();
+        timeline = timeline.DeleteBetween(MarkerId.StartBound, MarkerId.EndBound).RequireOk();
         var error = timeline.TryBuildExportPlan().RequireError();
         error.Code.Should().Be("NothingToExport");
     }
@@ -270,13 +390,13 @@ public class TimelineTests
         var timeline = CreateWithMarkers(10, 20, 30);
         timeline = timeline.DeleteBetween(timeline.Markers[0].Id, timeline.Markers[1].Id).RequireOk();
         var del = timeline.GetDeletedRuns().Single(r => r.IsInterior);
-        timeline = timeline.SetJoinCrossfade(del.Id, 1.5).RequireOk();
+        timeline = timeline.SetJoinCrossfade(del.Id, TimeSpan.FromSeconds(1.5)).RequireOk();
 
         var plan = timeline.TryBuildExportPlan().RequireOk();
         plan.Clips.Should().HaveCount(2);
         plan.JoinsBetweenClips.Should().ContainSingle()
             .Which.Mode.Should().Be(TransitionMode.Crossfade);
-        plan.JoinsBetweenClips[0].CrossfadeSeconds.Should().Be(1.5);
+        plan.JoinsBetweenClips[0].Crossfade.Should().Be(TimeSpan.FromSeconds(1.5));
     }
 
     [Fact]
@@ -291,7 +411,7 @@ public class TimelineTests
     public void OperationsDoNotThrowOnInvalidInput()
     {
         var timeline = Timeline.Create(TimeSpan.FromSeconds(10)).RequireOk();
-        var act = () => timeline.RemoveMarker(Guid.NewGuid());
+        var act = () => timeline.RemoveMarker(MarkerId.New());
         act.Should().NotThrow();
         act().RequireError();
     }
@@ -328,5 +448,32 @@ public class TimelineTests
         timeline.SnapToNearestKept(TimeSpan.FromSeconds(15)).Should().Be(TimeSpan.FromSeconds(10));
         timeline.SnapToNearestKept(TimeSpan.FromSeconds(18)).Should().Be(TimeSpan.FromSeconds(20));
         timeline.SnapToNearestKept(TimeSpan.FromSeconds(30)).Should().Be(TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
+    public void GetTransitionShadeRangesCoversFadesAndCrossfadeTails()
+    {
+        // keep 0-10, delete 10-20, keep 20-100
+        var timeline = CreateWithMarkers(10, 20);
+        timeline = timeline.DeleteBetween(timeline.Markers[0].Id, timeline.Markers[1].Id).RequireOk();
+        var del = timeline.GetDeletedRuns().Single(r => r.IsInterior);
+        timeline = timeline.SetJoinCrossfade(del.Id, TimeSpan.FromSeconds(3.0)).RequireOk();
+        timeline = timeline.SetStartFade(2.0).RequireOk();
+        timeline = timeline.SetEndFade(1.5).RequireOk();
+
+        var shades = timeline.GetTransitionShadeRanges();
+        shades.Should().HaveCount(4);
+
+        shades[0].Start.Should().Be(TimeSpan.Zero);
+        shades[0].End.TotalSeconds.Should().BeApproximately(2.0, 1e-6);
+
+        shades[1].Start.TotalSeconds.Should().BeApproximately(98.5, 1e-6);
+        shades[1].End.TotalSeconds.Should().BeApproximately(100.0, 1e-6);
+
+        shades[2].Start.TotalSeconds.Should().BeApproximately(7.0, 1e-6);
+        shades[2].End.TotalSeconds.Should().BeApproximately(10.0, 1e-6);
+
+        shades[3].Start.TotalSeconds.Should().BeApproximately(20.0, 1e-6);
+        shades[3].End.TotalSeconds.Should().BeApproximately(23.0, 1e-6);
     }
 }

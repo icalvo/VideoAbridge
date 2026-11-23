@@ -235,6 +235,11 @@
                           InputGestureText="M"
                           ToolTip="{Binding AddMarkerToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
+                <MenuItem Header="_Move Marker to Playhead"
+                          Command="{Binding MoveMarkerToPlayheadCommand}"
+                          InputGestureText="Ctrl+M"
+                          ToolTip="{Binding MoveMarkerToPlayheadToolTip}"
+                          ToolTipService.ShowOnDisabled="True"/>
                 <MenuItem Header="Delete Mar_ker"
                           Command="{Binding DeleteMarkerCommand}"
                           InputGestureText="Delete"
@@ -335,10 +340,12 @@
                           Command="{Binding SelectPreviousVersionCommand}"
                           InputGestureText="Ctrl+Shift+Tab"/>
             </MenuItem>
-            <MenuItem Header="_Help">
+            <MenuItem Header="_Help" SubmenuOpened="HelpMenu_SubmenuOpened">
                 <MenuItem Header="_Keyboard shortcuts"
                           InputGestureText="?"
                           Click="KeyboardShortcuts_Click"/>
+                <MenuItem x:Name="ExplorerContextMenuItem"
+                          Click="ExplorerContextMenu_Click"/>
             </MenuItem>
         </Menu>
 
@@ -405,18 +412,14 @@
                                         <TextBox Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}"
                                                  MinWidth="60"
                                                  Padding="2,1"
-                                                 Background="#1E1E1E"
-                                                 Foreground="White"
                                                  FontWeight="Bold"
                                                  BorderBrush="#5C7A9E"
-                                                 BorderThickness="1"
-                                                 CaretBrush="White"
                                                  VerticalAlignment="Center"
                                                  IsVisibleChanged="VersionTabRenameBox_IsVisibleChanged"
                                                  KeyDown="VersionTabRenameBox_KeyDown"
                                                  LostFocus="VersionTabRenameBox_LostFocus">
                                             <TextBox.Style>
-                                                <Style TargetType="TextBox">
+                                                <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
                                                     <Setter Property="Visibility" Value="Collapsed"/>
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding IsEditing}" Value="True">
@@ -700,6 +703,10 @@
                             Command="{Binding AddMarkerAtPlayheadCommand}"
                             ToolTip="{Binding AddMarkerToolTip}"
                             Style="{StaticResource ToolbarButtonGreen}" Margin="0,0,8,0"/>
+                    <Button Content="Move Marker to Playhead"
+                            Command="{Binding MoveMarkerToPlayheadCommand}"
+                            ToolTip="{Binding MoveMarkerToPlayheadToolTip}"
+                            Style="{StaticResource ToolbarButtonGreen}" Margin="0,0,8,0"/>
                     <Button Content="Delete Marker"
                             Command="{Binding DeleteMarkerCommand}"
                             ToolTip="{Binding DeleteMarkerToolTip}"
@@ -753,7 +760,6 @@
                                       MarkerThumbs="{Binding MarkerThumbs}"
                                       SelectedMarkerIds="{Binding SelectedMarkerIds}"
                                       SelectedDeletedRunId="{Binding SelectedDeletedRunId, Mode=TwoWay}"
-                                      TimelineFocusKind="{Binding TimelineFocusKind}"
                                       FocusedTimelineItemId="{Binding FocusedTimelineItemId}"/>
         </Grid>
     </DockPanel>

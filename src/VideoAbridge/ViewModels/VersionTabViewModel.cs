@@ -7,9 +7,9 @@ namespace VideoAbridge.ViewModels;
     "Usage",
     "CA1515:Consider making public types internal",
     Justification = "Bound from MainWindow version tab DataTemplate.")]
-public sealed partial class VersionTabViewModel(Guid id, string name, bool isActive) : ObservableObject
+public sealed partial class VersionTabViewModel(VersionId id, string name, bool isActive) : ObservableObject
 {
-    public Guid Id { get; } = id;
+    public VersionId Id { get; } = id;
 
     [ObservableProperty] private string _name = name;
     [ObservableProperty] private bool _isActive = isActive;

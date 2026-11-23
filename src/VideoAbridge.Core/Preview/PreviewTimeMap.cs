@@ -38,13 +38,13 @@ public sealed class PreviewTimeMap
             var incomingXf = i > 0
                 && i - 1 < joins.Count
                 && joins[i - 1].Mode == TransitionMode.Crossfade
-                && joins[i - 1].CrossfadeSeconds > 0
-                    ? joins[i - 1].CrossfadeSeconds
+                && joins[i - 1].Crossfade > TimeSpan.Zero
+                    ? joins[i - 1].Crossfade.TotalSeconds
                     : 0;
             var outgoingXf = i < joins.Count
                 && joins[i].Mode == TransitionMode.Crossfade
-                && joins[i].CrossfadeSeconds > 0
-                    ? joins[i].CrossfadeSeconds
+                && joins[i].Crossfade > TimeSpan.Zero
+                    ? joins[i].Crossfade.TotalSeconds
                     : 0;
 
             var srcStart = clip.Start.TotalSeconds + incomingXf;

@@ -33,7 +33,7 @@ public class AbridgedVersionSetTests
     public void CreateVersionFromScenesCopiesSharedSceneMarkersOnly()
     {
         var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(100)).RequireOk();
-        var sceneId = Guid.NewGuid();
+        var sceneId = MarkerId.New();
         set = set.AddSharedSceneMarker(TimeSpan.FromSeconds(20), sceneId).RequireOk();
         set = set.ReplaceActiveTimeline(
             set.ActiveTimeline.AddMarker(TimeSpan.FromSeconds(40), MarkerSource.User).RequireOk()).RequireOk();
@@ -117,7 +117,7 @@ public class AbridgedVersionSetTests
     {
         var set = AbridgedVersionSet.CreateDefault(TimeSpan.FromSeconds(90)).RequireOk();
         set = set.CreateVersionFromScenes("B").RequireOk();
-        var id = Guid.NewGuid();
+        var id = MarkerId.New();
         set = set.AddSharedSceneMarker(TimeSpan.FromSeconds(12), id).RequireOk();
 
         set.Versions.Should().HaveCount(2);

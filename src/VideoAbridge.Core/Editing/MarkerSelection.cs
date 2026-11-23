@@ -12,11 +12,11 @@ public static class MarkerSelection
     /// When <paramref name="extendSelection"/> is true (Shift), selection can grow to two
     /// or, when already at two, replace the nearest selected marker.
     /// </summary>
-    public static ImmutableList<Guid> ApplyClick(
-        IReadOnlyList<Guid> selectedIds,
-        Guid clickedId,
+    public static ImmutableList<MarkerId> ApplyClick(
+        IReadOnlyList<MarkerId> selectedIds,
+        MarkerId clickedId,
         bool extendSelection,
-        IReadOnlyDictionary<Guid, TimeSpan> markerTimes)
+        IReadOnlyDictionary<MarkerId, TimeSpan> markerTimes)
     {
         ArgumentNullException.ThrowIfNull(selectedIds);
         ArgumentNullException.ThrowIfNull(markerTimes);
@@ -37,10 +37,10 @@ public static class MarkerSelection
         };
     }
 
-    private static ImmutableList<Guid> ReplaceNearest(
-        IReadOnlyList<Guid> selectedIds,
-        Guid clickedId,
-        IReadOnlyDictionary<Guid, TimeSpan> markerTimes)
+    private static ImmutableList<MarkerId> ReplaceNearest(
+        IReadOnlyList<MarkerId> selectedIds,
+        MarkerId clickedId,
+        IReadOnlyDictionary<MarkerId, TimeSpan> markerTimes)
     {
         if (!markerTimes.TryGetValue(clickedId, out var clickedTime))
             return [clickedId];

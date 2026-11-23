@@ -30,7 +30,7 @@ internal sealed class ProjectDocument
             [
                 .. timeline.Markers.Select(m => new MarkerDto
                 {
-                    Id = m.Id,
+                    Id = m.Id.Value,
                     TimeSeconds = m.Time.TotalSeconds,
                     Source = m.Source.ToString()
                 })
@@ -40,9 +40,9 @@ internal sealed class ProjectDocument
             [
                 .. timeline.Joins.Select(j => new JoinDto
                 {
-                    DeletedRunId = j.DeletedRunId,
+                    DeletedRunId = j.DeletedRunId.Value,
                     Mode = j.Mode.ToString(),
-                    CrossfadeSeconds = j.CrossfadeSeconds
+                    CrossfadeSeconds = j.Crossfade.TotalSeconds
                 })
             ],
             FadeFromBlackSeconds = timeline.Settings.FadeFromBlackSeconds,
@@ -53,13 +53,13 @@ internal sealed class ProjectDocument
     public Result<(string VideoPath, Timeline Timeline)> ToTimeline()
     {
         if (DurationSeconds <= 0)
-            return Fail<(string, Timeline)>("InvalidProject", "Duration must be positive.");
+            return new DomainError("InvalidProject", "Duration must be positive.");
 
         if (SegmentDeleted.Count != Markers.Count + 1)
-            return Fail<(string, Timeline)>("InvalidProject", "Segment count must equal marker count + 1.");
+            return new DomainError("InvalidProject", "Segment count must equal marker count + 1.");
 
         if (Markers.Any(m => m.TimeSeconds <= 0 || m.TimeSeconds >= DurationSeconds))
-            return Fail<(string, Timeline)>("InvalidProject", "Marker time out of range.");
+            return new DomainError("InvalidProject", "Marker time out of range.");
 
         ImmutableList<Marker> markers =
         [
@@ -69,7 +69,10 @@ internal sealed class ProjectDocument
                 {
                     if (!Enum.TryParse<MarkerSource>(marker.Source, out var source))
                         source = MarkerSource.User;
-                    return new Marker(marker.Id, TimeSpan.FromSeconds(marker.TimeSeconds), source);
+                    return new Marker(
+                        marker.Id == Guid.Empty ? MarkerId.New() : MarkerId.From(marker.Id),
+                        TimeSpan.FromSeconds(marker.TimeSeconds),
+                        source);
                 })
         ];
 
@@ -80,9 +83,11 @@ internal sealed class ProjectDocument
                 if (!Enum.TryParse<TransitionMode>(dto.Mode, out var mode))
                     mode = TransitionMode.HardCut;
                 return new JoinTransition(
-                    dto.DeletedRunId == Guid.Empty ? Guid.NewGuid() : dto.DeletedRunId,
+                    dto.DeletedRunId == Guid.Empty ? DeletedRunId.New() : DeletedRunId.From(dto.DeletedRunId),
                     mode,
-                    mode == TransitionMode.Crossfade ? dto.CrossfadeSeconds : 0);
+                    mode == TransitionMode.Crossfade
+                        ? TimeSpan.FromSeconds(dto.CrossfadeSeconds)
+                        : TimeSpan.Zero);
             })
         ];
 
@@ -93,17 +98,17 @@ internal sealed class ProjectDocument
                 [.. SegmentDeleted],
                 joins,
                 settings)
-            .Bind(timeline =>
+            .Bind<(string VideoPath, Timeline Timeline)>(timeline =>
             {
                 var interiorCount = timeline.GetDeletedRuns().Count(r => r.IsInterior);
                 if (joins.Count != interiorCount)
                 {
-                    return Fail<(string, Timeline)>(
+                    return new DomainError(
                         "InvalidProject",
                         "Join count does not match interior deleted runs.");
                 }
 
-                return Ok((VideoPath, timeline));
+                return (VideoPath, timeline);
             });
     }
 
@@ -123,16 +128,16 @@ internal sealed class ProjectDocument
         {
             var doc = JsonSerializer.Deserialize<ProjectDocument>(json, JsonOptions);
             if (doc is null)
-                return Fail<ProjectDocument>("InvalidProject", "Project file was empty.");
-            return Ok(doc);
+                return new DomainError("InvalidProject", "Project file was empty.");
+            return doc;
         }
         catch (JsonException ex)
         {
-            return Fail<ProjectDocument>("InvalidProject", ex.Message);
+            return new DomainError("InvalidProject", ex.Message);
         }
         catch (NotSupportedException ex)
         {
-            return Fail<ProjectDocument>("InvalidProject", ex.Message);
+            return new DomainError("InvalidProject", ex.Message);
         }
     }
 }

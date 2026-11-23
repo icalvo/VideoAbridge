@@ -10,6 +10,6 @@ Build already fails on CA/IDE issues (`TreatWarningsAsErrors`, `AnalysisMode=All
 
 ## Prefer these patterns
 
-- Results: `using static VideoAbridge.Core.Results;` then `Ok(...)` / `Fail<T>(...)`
+- Results: return `T` or `new DomainError(...)` from `Result<T>` methods (union cases convert implicitly)
 - Awaits: `ConfigureAwait(true)` on UI continuations; `ConfigureAwait(false)` in Core/FFmpeg
 - Suppressions only for WPF/XAML public surface (`CA1515`) or LibVLC dispose off the UI thread (`CA2213`) — match existing `AssemblyInfo` / field justifications

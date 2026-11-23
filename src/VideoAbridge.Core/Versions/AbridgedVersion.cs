@@ -2,7 +2,7 @@ namespace VideoAbridge.Core.Versions;
 
 public sealed class AbridgedVersion
 {
-    public AbridgedVersion(Guid id, string name, Timeline timeline)
+    public AbridgedVersion(VersionId id, string name, Timeline timeline)
     {
         ArgumentNullException.ThrowIfNull(timeline);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -12,7 +12,7 @@ public sealed class AbridgedVersion
         Timeline = timeline;
     }
 
-    public Guid Id { get; }
+    public VersionId Id { get; }
     public string Name { get; }
     public Timeline Timeline { get; }
 

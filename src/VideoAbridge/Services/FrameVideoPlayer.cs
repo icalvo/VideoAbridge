@@ -48,13 +48,13 @@ internal sealed class FrameVideoPlayer : IDisposable
     public void Load(string path)
     {
         ThrowIfDisposed();
-        EnsurePlayer();
+        var player = EnsurePlayer();
         _media?.Dispose();
         _media = new VlcMedia(_libVlc, path, FromType.FromPath);
-        _mediaPlayer!.Media = _media;
+        player.Media = _media;
         AttachCallbacks();
-        _mediaPlayer.Play();
-        _mediaPlayer.SetPause(true);
+        player.Play();
+        player.SetPause(true);
     }
 
     public void Seek(TimeSpan time)
@@ -135,11 +135,10 @@ internal sealed class FrameVideoPlayer : IDisposable
         }
     }
 
-    private void EnsurePlayer()
+    private VlcMediaPlayer EnsurePlayer()
     {
-        if (_mediaPlayer is not null)
-            return;
-        _mediaPlayer = new VlcMediaPlayer(_libVlc);
+        _mediaPlayer ??= new VlcMediaPlayer(_libVlc);
+        return _mediaPlayer;
     }
 
     private void AttachCallbacks()

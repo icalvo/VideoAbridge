@@ -68,4 +68,4 @@ using System.Windows;
     "CA1515:Consider making public types internal",
     Justification = "Public EventArgs for TimelineControl events required by WPF public API surface.",
     Scope = "type",
-    Target = "~T:VideoAbridge.Controls.GuidEventArgs")]
+    Target = "~T:VideoAbridge.Controls.TimelineItemIdEventArgs")]

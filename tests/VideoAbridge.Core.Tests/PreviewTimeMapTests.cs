@@ -12,7 +12,7 @@ public class PreviewTimeMapTests
                 new TimeRange(TimeSpan.FromSeconds(0), TimeSpan.FromSeconds(10)),
                 new TimeRange(TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(30))
             ],
-            [new ExportJoin(TransitionMode.HardCut, 0)],
+            [new ExportJoin(TransitionMode.HardCut, TimeSpan.Zero)],
             FadeFromBlackSeconds: null,
             FadeToBlackSeconds: null);
 
@@ -35,7 +35,7 @@ public class PreviewTimeMapTests
                 new TimeRange(TimeSpan.FromSeconds(0), TimeSpan.FromSeconds(10)),
                 new TimeRange(TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(30))
             ],
-            [new ExportJoin(TransitionMode.Crossfade, 2)],
+            [new ExportJoin(TransitionMode.Crossfade, TimeSpan.FromSeconds(2))],
             FadeFromBlackSeconds: null,
             FadeToBlackSeconds: null);
 

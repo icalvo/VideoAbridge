@@ -14,7 +14,7 @@ public class VideoExporterTests
                 new TimeRange(TimeSpan.FromSeconds(0), TimeSpan.FromSeconds(10)),
                 new TimeRange(TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(30))
             ],
-            [new ExportJoin(TransitionMode.Crossfade, 1.5)],
+            [new ExportJoin(TransitionMode.Crossfade, TimeSpan.FromSeconds(1.5))],
             FadeFromBlackSeconds: 1,
             FadeToBlackSeconds: 2);
 
@@ -37,7 +37,7 @@ public class VideoExporterTests
                 new TimeRange(TimeSpan.Zero, TimeSpan.FromSeconds(5)),
                 new TimeRange(TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(12))
             ],
-            [new ExportJoin(TransitionMode.HardCut, 0)],
+            [new ExportJoin(TransitionMode.HardCut, TimeSpan.Zero)],
             FadeFromBlackSeconds: null,
             FadeToBlackSeconds: null);
 

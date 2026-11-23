@@ -41,9 +41,9 @@ public sealed class VideoExporter(string? ffmpegPath = null)
                 if (!TryParseTimestamp(token, out var currentSeconds))
                     return;
 
-                var total = EstimateOutputDuration(plan).TotalSeconds;
-                if (total > 0)
-                    progress?.Report(Math.Clamp(currentSeconds / total, 0, 1));
+                var total = EstimateOutputDuration(plan);
+                if (total > TimeSpan.Zero)
+                    progress?.Report(Math.Clamp(currentSeconds / total.TotalSeconds, 0, 1));
             },
             cancellationToken).ConfigureAwait(false);
 
@@ -118,7 +118,7 @@ public sealed class VideoExporter(string? ffmpegPath = null)
 
         string vCurrent = "v0";
         string aCurrent = "a0";
-        var accumulated = plan.Clips[0].Duration.TotalSeconds;
+        var accumulated = plan.Clips[0].Duration;
 
         for (var i = 0; i < plan.JoinsBetweenClips.Count; i++)
         {
@@ -128,44 +128,48 @@ public sealed class VideoExporter(string? ffmpegPath = null)
             var outV = $"vx{i}";
             var outA = $"ax{i}";
 
-            if (join.Mode == TransitionMode.HardCut || join.CrossfadeSeconds <= 0)
+            if (join.Mode == TransitionMode.HardCut || join.Crossfade <= TimeSpan.Zero)
             {
                 sb.Append(CultureInfo.InvariantCulture, $"[{vCurrent}][{nextV}]concat=n=2:v=1:a=0[{outV}];");
                 sb.Append(CultureInfo.InvariantCulture, $"[{aCurrent}][{nextA}]concat=n=2:v=0:a=1[{outA}];");
-                accumulated += plan.Clips[i + 1].Duration.TotalSeconds;
+                accumulated += plan.Clips[i + 1].Duration;
             }
             else
             {
-                var d = join.CrossfadeSeconds;
-                var offset = Math.Max(0, accumulated - d);
+                var d = join.Crossfade;
+                var offset = TimeSpans.Max(TimeSpan.Zero, accumulated - d);
                 sb.Append(CultureInfo.InvariantCulture,
-                    $"[{vCurrent}][{nextV}]xfade=transition=fade:duration={FormatDouble(d)}:offset={FormatDouble(offset)}[{outV}];");
+                    $"[{vCurrent}][{nextV}]xfade=transition=fade:duration={Format(d)}:offset={Format(offset)}[{outV}];");
                 sb.Append(CultureInfo.InvariantCulture,
-                    $"[{aCurrent}][{nextA}]acrossfade=d={FormatDouble(d)}[{outA}];");
-                accumulated = offset + plan.Clips[i + 1].Duration.TotalSeconds;
+                    $"[{aCurrent}][{nextA}]acrossfade=d={Format(d)}[{outA}];");
+                accumulated = offset + plan.Clips[i + 1].Duration;
             }
 
             vCurrent = outV;
             aCurrent = outA;
         }
 
-        var fadeIn = plan.FadeFromBlackSeconds is > 0 ? plan.FadeFromBlackSeconds.Value : 0;
-        var fadeOut = plan.FadeToBlackSeconds is > 0 ? plan.FadeToBlackSeconds.Value : 0;
-        if (fadeIn > 0 || fadeOut > 0)
+        var fadeIn = plan.FadeFromBlackSeconds is > 0
+            ? TimeSpan.FromSeconds(plan.FadeFromBlackSeconds.Value)
+            : TimeSpan.Zero;
+        var fadeOut = plan.FadeToBlackSeconds is > 0
+            ? TimeSpan.FromSeconds(plan.FadeToBlackSeconds.Value)
+            : TimeSpan.Zero;
+        if (fadeIn > TimeSpan.Zero || fadeOut > TimeSpan.Zero)
         {
             var vFilters = new List<string>();
             var aFilters = new List<string>();
-            if (fadeIn > 0)
+            if (fadeIn > TimeSpan.Zero)
             {
-                vFilters.Add($"fade=t=in:st=0:d={FormatDouble(fadeIn)}");
-                aFilters.Add($"afade=t=in:st=0:d={FormatDouble(fadeIn)}");
+                vFilters.Add($"fade=t=in:st=0:d={Format(fadeIn)}");
+                aFilters.Add($"afade=t=in:st=0:d={Format(fadeIn)}");
             }
 
-            if (fadeOut > 0)
+            if (fadeOut > TimeSpan.Zero)
             {
-                var fadeStart = Math.Max(0, accumulated - fadeOut);
-                vFilters.Add($"fade=t=out:st={FormatDouble(fadeStart)}:d={FormatDouble(fadeOut)}");
-                aFilters.Add($"afade=t=out:st={FormatDouble(fadeStart)}:d={FormatDouble(fadeOut)}");
+                var fadeStart = TimeSpans.Max(TimeSpan.Zero, accumulated - fadeOut);
+                vFilters.Add($"fade=t=out:st={Format(fadeStart)}:d={Format(fadeOut)}");
+                aFilters.Add($"afade=t=out:st={Format(fadeStart)}:d={Format(fadeOut)}");
             }
 
             sb.Append(CultureInfo.InvariantCulture, $"[{vCurrent}]{string.Join(",", vFilters)}[vout];");
@@ -182,21 +186,18 @@ public sealed class VideoExporter(string? ffmpegPath = null)
 
     private static TimeSpan EstimateOutputDuration(ExportPlan plan)
     {
-        var total = plan.Clips.Sum(c => c.Duration.TotalSeconds);
+        var total = plan.Clips.Sum(c => c.Duration);
         foreach (var join in plan.JoinsBetweenClips)
         {
             if (join.Mode == TransitionMode.Crossfade)
-                total -= join.CrossfadeSeconds;
+                total -= join.Crossfade;
         }
 
-        return TimeSpan.FromSeconds(Math.Max(0, total));
+        return TimeSpans.Max(TimeSpan.Zero, total);
     }
 
     private static string Format(TimeSpan time) =>
         time.TotalSeconds.ToString("0.000", CultureInfo.InvariantCulture);
-
-    private static string FormatDouble(double value) =>
-        value.ToString("0.000", CultureInfo.InvariantCulture);
 
     private static bool TryParseTimestamp(ReadOnlySpan<char> token, out double seconds)
     {

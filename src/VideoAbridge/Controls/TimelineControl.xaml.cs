@@ -46,7 +46,7 @@ public partial class TimelineControl : UserControl
             new PropertyMetadata(null, OnSelectedMarkerIdsChanged));
 
     public static readonly DependencyProperty SelectedDeletedRunIdProperty =
-        DependencyProperty.Register(nameof(SelectedDeletedRunId), typeof(Guid?), typeof(TimelineControl),
+        DependencyProperty.Register(nameof(SelectedDeletedRunId), typeof(DeletedRunId?), typeof(TimelineControl),
             new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, OnVisualPropertyChanged));
 
     public static readonly DependencyProperty IsPreviewModeProperty =
@@ -69,12 +69,8 @@ public partial class TimelineControl : UserControl
         DependencyProperty.Register(nameof(PreviewTimeMap), typeof(PreviewTimeMap), typeof(TimelineControl),
             new PropertyMetadata(null, OnVisualPropertyChanged));
 
-    public static readonly DependencyProperty TimelineFocusKindProperty =
-        DependencyProperty.Register(nameof(TimelineFocusKind), typeof(TimelineFocusKind), typeof(TimelineControl),
-            new PropertyMetadata(TimelineFocusKind.None, OnFocusItemChanged));
-
     public static readonly DependencyProperty FocusedTimelineItemIdProperty =
-        DependencyProperty.Register(nameof(FocusedTimelineItemId), typeof(Guid?), typeof(TimelineControl),
+        DependencyProperty.Register(nameof(FocusedTimelineItemId), typeof(TimelineItemId?), typeof(TimelineControl),
             new PropertyMetadata(null, OnFocusItemChanged));
 
     public static readonly DependencyProperty IsTimelineKeyboardFocusedProperty =
@@ -92,12 +88,16 @@ public partial class TimelineControl : UserControl
     private static readonly Brush KeepDurationLabelBrush = CreateFrozenBrush(0x9A, 0x9A, 0x9E);
     private static readonly Brush FocusTriangleBrightBrush = CreateFrozenBrush(0xFF, 0x33, 0x33);
     private static readonly Brush FocusTriangleDimBrush = CreateFrozenBrush(0x66, 0x14, 0x14);
+    private static readonly Brush KeptSegmentBrush = CreateFrozenBrush(0x32, 0x6E, 0x46);
+    /// <summary>40% darker than <see cref="KeptSegmentBrush"/> for fade/crossfade tails.</summary>
+    private static readonly Brush TransitionShadeBrush = CreateFrozenBrush(0x1E, 0x42, 0x2A);
+    private static readonly Brush DeletedSegmentBrush = CreateFrozenBrush(0x78, 0x28, 0x28);
 
     private Line? _playheadLine;
     private TimeSpan _fittedDuration = TimeSpan.Zero;
     private bool _updatingZoom;
     private double _lastViewportWidth;
-    private HashSet<Guid> _selectedMarkerSet = [];
+    private HashSet<MarkerId> _selectedMarkerSet = [];
     private readonly DispatcherTimer _thumbRedrawTimer = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private readonly List<(AbridgedOverlay Overlay, double Left, double Right)> _previewHitRegions = [];
 
@@ -144,19 +144,18 @@ public partial class TimelineControl : UserControl
     /// </summary>
     public void EnsureFocusedItemVisible()
     {
-        if (IsPreviewMode || Timeline is null || FocusedTimelineItemId is not Guid id)
+        if (IsPreviewMode || Timeline is null || FocusedTimelineItemId is not { } focus)
             return;
 
         var pps = Math.Max(MinPixelsPerSecond, PixelsPerSecond);
-        double? centerX = TimelineFocusKind switch
+        double? centerX = focus switch
         {
-            TimelineFocusKind.Marker => Timeline.Markers.FirstOrDefault(m => m.Id == id) is { } marker
+            MarkerId markerId => Timeline.Markers.FirstOrDefault(m => m.Id == markerId) is { } marker
                 ? marker.Time.TotalSeconds * pps
                 : null,
-            TimelineFocusKind.DeletedRun => Timeline.GetDeletedRuns().FirstOrDefault(r => r.Id == id) is { } run
+            DeletedRunId runId => Timeline.GetDeletedRuns().FirstOrDefault(r => r.Id == runId) is { } run
                 ? (run.Range.Start.TotalSeconds + run.Range.End.TotalSeconds) / 2.0 * pps
                 : null,
-            _ => null,
         };
 
         if (centerX is not { } x)
@@ -221,9 +220,9 @@ public partial class TimelineControl : UserControl
         set => SetValue(SelectedMarkerIdsProperty, value);
     }
 
-    public Guid? SelectedDeletedRunId
+    public DeletedRunId? SelectedDeletedRunId
     {
-        get => (Guid?)GetValue(SelectedDeletedRunIdProperty);
+        get => (DeletedRunId?)GetValue(SelectedDeletedRunIdProperty);
         set => SetValue(SelectedDeletedRunIdProperty, value);
     }
 
@@ -257,15 +256,9 @@ public partial class TimelineControl : UserControl
         set => SetValue(PreviewTimeMapProperty, value);
     }
 
-    public TimelineFocusKind TimelineFocusKind
+    public TimelineItemId? FocusedTimelineItemId
     {
-        get => (TimelineFocusKind)GetValue(TimelineFocusKindProperty);
-        set => SetValue(TimelineFocusKindProperty, value);
-    }
-
-    public Guid? FocusedTimelineItemId
-    {
-        get => (Guid?)GetValue(FocusedTimelineItemIdProperty);
+        get => (TimelineItemId?)GetValue(FocusedTimelineItemIdProperty);
         set => SetValue(FocusedTimelineItemIdProperty, value);
     }
 
@@ -276,8 +269,8 @@ public partial class TimelineControl : UserControl
     }
 
     public event EventHandler<TimeSpanEventArgs>? SeekRequested;
-    public event EventHandler<GuidEventArgs>? MarkerClicked;
-    public event EventHandler<GuidEventArgs>? DeletedRunSelected;
+    public event EventHandler<TimelineItemIdEventArgs>? MarkerClicked;
+    public event EventHandler<TimelineItemIdEventArgs>? DeletedRunSelected;
     public event EventHandler? TimelineViewChanged;
     public event EventHandler? FadeInClicked;
     public event EventHandler? FadeOutClicked;
@@ -380,7 +373,7 @@ public partial class TimelineControl : UserControl
 
     private void RefreshSelectedMarkerSet()
     {
-        _selectedMarkerSet = SelectedMarkerIds?.OfType<Guid>().ToHashSet() ?? [];
+        _selectedMarkerSet = SelectedMarkerIds?.OfType<MarkerId>().ToHashSet() ?? [];
     }
 
     private static void OnPlayheadChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) =>
@@ -533,18 +526,17 @@ public partial class TimelineControl : UserControl
 
     private double? TryGetFocusCenterSeconds()
     {
-        if (IsPreviewMode || Timeline is null || FocusedTimelineItemId is not Guid id)
+        if (IsPreviewMode || Timeline is null || FocusedTimelineItemId is not { } focus)
             return null;
 
-        return TimelineFocusKind switch
+        return focus switch
         {
-            TimelineFocusKind.Marker => Timeline.Markers.FirstOrDefault(m => m.Id == id) is { } marker
+            MarkerId markerId => Timeline.Markers.FirstOrDefault(m => m.Id == markerId) is { } marker
                 ? marker.Time.TotalSeconds
                 : null,
-            TimelineFocusKind.DeletedRun => Timeline.GetDeletedRuns().FirstOrDefault(r => r.Id == id) is { } run
+            DeletedRunId runId => Timeline.GetDeletedRuns().FirstOrDefault(r => r.Id == runId) is { } run
                 ? (run.Range.Start.TotalSeconds + run.Range.End.TotalSeconds) / 2.0
                 : null,
-            _ => null,
         };
     }
 
@@ -656,7 +648,7 @@ public partial class TimelineControl : UserControl
         {
             Width = Math.Max(1, trackWidth),
             Height = trackHeight,
-            Fill = CreateFrozenBrush(0x32, 0x6E, 0x46),
+            Fill = KeptSegmentBrush,
             Stroke = Brushes.Black,
             StrokeThickness = 0.5,
             IsHitTestVisible = false
@@ -671,9 +663,9 @@ public partial class TimelineControl : UserControl
             _previewHitRegions.Add((overlay, left, right));
 
             var selectedInterior = overlay.Value is InteriorOverlay interior
-                && SelectedDeletedRunId is Guid sel
+                && SelectedDeletedRunId is { } sel
                 && interior.DeletedRunId == sel
-                && interior.DeletedRunId != Guid.Empty;
+                && !interior.DeletedRunId.IsEmpty;
 
             var rect = new Rectangle
             {
@@ -760,9 +752,7 @@ public partial class TimelineControl : UserControl
             {
                 Width = Math.Max(1, end - start),
                 Height = trackHeight,
-                Fill = deleted
-                    ? new SolidColorBrush(Color.FromRgb(120, 40, 40))
-                    : new SolidColorBrush(Color.FromRgb(50, 110, 70)),
+                Fill = deleted ? DeletedSegmentBrush : KeptSegmentBrush,
                 Stroke = Brushes.Black,
                 StrokeThickness = 0.5,
                 Tag = ("segment", i)
@@ -770,6 +760,25 @@ public partial class TimelineControl : UserControl
             Canvas.SetLeft(rect, start);
             Canvas.SetTop(rect, trackTop);
             RootCanvas.Children.Add(rect);
+        }
+
+        foreach (var shade in timeline.GetTransitionShadeRanges())
+        {
+            var left = shade.Start.TotalSeconds * pps;
+            var right = shade.End.TotalSeconds * pps;
+            if (right - left < 0.5)
+                continue;
+
+            var shadeRect = new Rectangle
+            {
+                Width = Math.Max(1, right - left),
+                Height = trackHeight,
+                Fill = TransitionShadeBrush,
+                IsHitTestVisible = false
+            };
+            Canvas.SetLeft(shadeRect, left);
+            Canvas.SetTop(shadeRect, trackTop);
+            RootCanvas.Children.Add(shadeRect);
         }
 
         DrawEditWaveform(timeline.Duration, pps, trackTop, trackHeight);
@@ -796,14 +805,13 @@ public partial class TimelineControl : UserControl
             label.MouseLeftButtonDown += (_, e) =>
             {
                 Focus();
-                DeletedRunSelected?.Invoke(this, new GuidEventArgs(run.Id));
+                DeletedRunSelected?.Invoke(this, new TimelineItemIdEventArgs(run.Id));
                 SelectedDeletedRunId = run.Id;
                 e.Handled = true;
             };
             RootCanvas.Children.Add(label);
 
-            if (TimelineFocusKind == TimelineFocusKind.DeletedRun
-                && FocusedTimelineItemId == run.Id)
+            if (FocusedTimelineItemId == run.Id)
             {
                 AddFocusTriangle(mid, trackTop + trackHeight + 18);
             }
@@ -869,7 +877,7 @@ public partial class TimelineControl : UserControl
             line.MouseLeftButtonDown += (_, e) =>
             {
                 Focus();
-                MarkerClicked?.Invoke(this, new GuidEventArgs(marker.Id));
+                MarkerClicked?.Invoke(this, new TimelineItemIdEventArgs(marker.Id));
                 e.Handled = true;
             };
             RootCanvas.Children.Add(line);
@@ -887,13 +895,12 @@ public partial class TimelineControl : UserControl
             handle.MouseLeftButtonDown += (_, e) =>
             {
                 Focus();
-                MarkerClicked?.Invoke(this, new GuidEventArgs(marker.Id));
+                MarkerClicked?.Invoke(this, new TimelineItemIdEventArgs(marker.Id));
                 e.Handled = true;
             };
             RootCanvas.Children.Add(handle);
 
-            if (TimelineFocusKind == TimelineFocusKind.Marker
-                && FocusedTimelineItemId == marker.Id)
+            if (FocusedTimelineItemId == marker.Id)
             {
                 AddFocusTriangle(x, trackTop + trackHeight + 6);
             }
@@ -1059,17 +1066,24 @@ public partial class TimelineControl : UserControl
         double trackTop,
         double trackHeight)
     {
-        for (var i = 0; i < timeline.Markers.Count - 1; i++)
+        // Segments[0] = start→first marker; Segments[i+1] = markers[i]→markers[i+1];
+        // Segments[Markers.Count] = last marker→end (or the whole timeline when empty).
+        for (var i = 0; i < timeline.Segments.Count; i++)
         {
-            // Segment between markers[i] and markers[i+1] is Segments[i+1].
-            if (timeline.Segments[i + 1].IsDeleted)
+            if (timeline.Segments[i].IsDeleted)
                 continue;
 
-            var leftMarker = timeline.Markers[i];
-            var rightMarker = timeline.Markers[i + 1];
-            var left = leftMarker.Time.TotalSeconds * pps;
-            var right = rightMarker.Time.TotalSeconds * pps;
-            var labelText = FormatKeepDuration(rightMarker.Time - leftMarker.Time);
+            var start = i == 0 ? TimeSpan.Zero : timeline.Markers[i - 1].Time;
+            var end = i == timeline.Markers.Count ? timeline.Duration : timeline.Markers[i].Time;
+            var left = start.TotalSeconds * pps;
+            var right = end.TotalSeconds * pps;
+            var gap = right - left;
+            var labelText = FormatKeepDuration(end - start);
+            // Same width estimate used for centering; skip when the keep gap can't fit the text.
+            var labelWidth = Math.Max(12, labelText.Length * 3.2);
+            if (gap < labelWidth)
+                continue;
+
             var label = new TextBlock
             {
                 Text = labelText,
@@ -1078,7 +1092,7 @@ public partial class TimelineControl : UserControl
                 IsHitTestVisible = false
             };
             var mid = (left + right) / 2;
-            Canvas.SetLeft(label, mid - Math.Max(12, labelText.Length * 3.2));
+            Canvas.SetLeft(label, mid - labelWidth);
             Canvas.SetTop(label, trackTop + trackHeight + 4);
             RootCanvas.Children.Add(label);
         }
@@ -1097,7 +1111,7 @@ public partial class TimelineControl : UserControl
         if (run.IsInterior)
         {
             return run.Join?.Mode == TransitionMode.Crossfade
-                ? $"XF {run.Join.CrossfadeSeconds:0.##}s"
+                ? $"XF {run.Join.Crossfade.TotalSeconds:0.##}s"
                 : "Cut";
         }
 
@@ -1125,9 +1139,9 @@ public partial class TimelineControl : UserControl
         {
             FadeOutClicked?.Invoke(this, EventArgs.Empty);
         }
-        else if (overlay is InteriorOverlay { DeletedRunId: var id } && id != Guid.Empty)
+        else if (overlay is InteriorOverlay { DeletedRunId: var id } && !id.IsEmpty)
         {
-            DeletedRunSelected?.Invoke(this, new GuidEventArgs(id));
+            DeletedRunSelected?.Invoke(this, new TimelineItemIdEventArgs(id));
             SelectedDeletedRunId = id;
         }
     }

@@ -11,7 +11,7 @@ public class PreviewVisualStateTests
                 new TimeRange(TimeSpan.FromSeconds(0), TimeSpan.FromSeconds(10)),
                 new TimeRange(TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(30))
             ],
-            [new ExportJoin(TransitionMode.HardCut, 0)],
+            [new ExportJoin(TransitionMode.HardCut, TimeSpan.Zero)],
             FadeFromBlackSeconds: null,
             FadeToBlackSeconds: null);
         return (plan, PreviewTimeMap.FromPlan(plan));

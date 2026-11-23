@@ -5,4 +5,3 @@ global using VideoAbridge.Core.Outcome;
 global using VideoAbridge.Core.Versions;
 global using VideoAbridge.FFmpeg;
 global using VideoAbridge.Services;
-global using static VideoAbridge.Core.Outcome.Results;

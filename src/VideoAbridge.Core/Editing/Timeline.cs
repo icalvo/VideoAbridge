@@ -4,14 +4,6 @@ namespace VideoAbridge.Core.Editing;
 
 public sealed class Timeline
 {
-    public static readonly Guid StartBoundId = Guid.Parse("00000000-0000-0000-0000-000000000001");
-    public static readonly Guid EndBoundId = Guid.Parse("00000000-0000-0000-0000-000000000002");
-    /// <summary>Stable id for a deleted run that starts at t=0 (not interior).</summary>
-    public static readonly Guid LeadingDeletedRunId = Guid.Parse("00000000-0000-0000-0000-000000000003");
-    /// <summary>Stable id for a deleted run that ends at Duration (not interior).</summary>
-    public static readonly Guid TrailingDeletedRunId = Guid.Parse("00000000-0000-0000-0000-000000000004");
-    /// <summary>Stable id when the entire timeline is deleted.</summary>
-    public static readonly Guid FullDeletedRunId = Guid.Parse("00000000-0000-0000-0000-000000000005");
     public static readonly TimeSpan MarkerEpsilon = TimeSpan.FromMilliseconds(40);
 
     private Timeline(
@@ -42,9 +34,9 @@ public sealed class Timeline
     public static Result<Timeline> Create(TimeSpan duration)
     {
         if (duration <= TimeSpan.Zero)
-            return Fail<Timeline>("InvalidDuration", "Duration must be positive.");
+            return new DomainError("InvalidDuration", "Duration must be positive.");
 
-        return Ok(Empty(duration));
+        return Empty(duration);
     }
 
     /// <summary>
@@ -62,15 +54,15 @@ public sealed class Timeline
         ArgumentNullException.ThrowIfNull(joins);
         ArgumentNullException.ThrowIfNull(settings);
         if (duration <= TimeSpan.Zero)
-            return Fail<Timeline>("InvalidDuration", "Duration must be positive.");
+            return new DomainError("InvalidDuration", "Duration must be positive.");
         if (segmentDeleted.Count != markers.Count + 1)
-            return Fail<Timeline>("InvalidSegmentCount", "Segment count must equal marker count + 1.");
+            return new DomainError("InvalidSegmentCount", "Segment count must equal marker count + 1.");
         if (markers.Any(m => m.Time <= TimeSpan.Zero || m.Time >= duration))
-            return Fail<Timeline>("MarkerOutOfRange", "Marker time must be strictly inside the timeline.");
+            return new DomainError("MarkerOutOfRange", "Marker time must be strictly inside the timeline.");
 
         ImmutableList<Marker> orderedMarkers = [.. markers.OrderBy(m => m.Time)];
         ImmutableList<SegmentState> segments = [.. segmentDeleted.Select(d => new SegmentState(d))];
-        return Ok(new Timeline(duration, orderedMarkers, segments, joins, settings));
+        return new Timeline(duration, orderedMarkers, segments, joins, settings);
     }
 
     /// <summary>Empty kept timeline; caller must ensure <paramref name="duration"/> is positive.</summary>
@@ -93,16 +85,16 @@ public sealed class Timeline
                 if (!range.IsInteriorOf(Duration))
                 {
                     var edgeId = range.Covers(Duration)
-                        ? FullDeletedRunId
+                        ? DeletedRunId.Full
                         : range.TouchesStart
-                            ? LeadingDeletedRunId
-                            : TrailingDeletedRunId;
+                            ? DeletedRunId.Leading
+                            : DeletedRunId.Trailing;
                     return (state.Runs.Add(new DeletedRun(edgeId, range, false, null)), state.InteriorIndex);
                 }
 
                 var join = state.InteriorIndex < Joins.Count
                     ? Joins[state.InteriorIndex]
-                    : new JoinTransition(Guid.NewGuid(), TransitionMode.HardCut, 0);
+                    : new JoinTransition(DeletedRunId.New(), TransitionMode.HardCut, TimeSpan.Zero);
                 return (
                     state.Runs.Add(new DeletedRun(join.DeletedRunId, range, true, join)),
                     state.InteriorIndex + 1);
@@ -113,7 +105,7 @@ public sealed class Timeline
 
     /// <summary>Total duration of all non-deleted sections (the abridged output length).</summary>
     public TimeSpan GetAbridgedDuration() =>
-        GetKeptRuns().Aggregate(TimeSpan.Zero, (total, run) => total + run.Duration);
+        GetKeptRuns().Sum(run => run.Duration);
 
     /// <summary>
     /// True when <paramref name="time"/> falls inside a kept section (inclusive of both ends).
@@ -151,15 +143,15 @@ public sealed class Timeline
     }
 
     public Result<Timeline> AddMarker(TimeSpan time, MarkerSource source) =>
-        AddMarker(time, source, Guid.NewGuid());
+        AddMarker(time, source, MarkerId.New());
 
-    public Result<Timeline> AddMarker(TimeSpan time, MarkerSource source, Guid id)
+    public Result<Timeline> AddMarker(TimeSpan time, MarkerSource source, MarkerId id)
     {
         if (time <= TimeSpan.Zero || time >= Duration)
-            return Fail<Timeline>("MarkerOutOfRange", "Marker time must be strictly inside the timeline.");
+            return new DomainError("MarkerOutOfRange", "Marker time must be strictly inside the timeline.");
 
         if (Markers.Any(m => AbsDiff(m.Time, time) <= MarkerEpsilon))
-            return Fail<Timeline>("MarkerTooClose", "A marker already exists near that time.");
+            return new DomainError("MarkerTooClose", "A marker already exists near that time.");
 
         var insertIndex = Markers.FindIndex(m => m.Time > time);
         if (insertIndex < 0)
@@ -174,16 +166,115 @@ public sealed class Timeline
 
         var newMarkers = Markers.Insert(insertIndex, new Marker(id, time, source));
         // Splitting inside a run does not change deleted-run topology / joins.
-        return Ok(new Timeline(Duration, newMarkers, newSegments, Joins, Settings));
+        return new Timeline(Duration, newMarkers, newSegments, Joins, Settings);
     }
+
+    /// <summary>
+    /// Moves an existing marker to <paramref name="newTime"/> without changing marker order.
+    /// Fails when the time is out of range, too close to a neighbor/edge, would reorder markers,
+    /// or would make an existing crossfade / edge fade exceed its cap.
+    /// </summary>
+    public Result<Timeline> MoveMarker(MarkerId markerId, TimeSpan newTime)
+    {
+        var index = Markers.FindIndex(m => m.Id == markerId);
+        if (index < 0)
+            return new DomainError("MarkerNotFound", "Marker was not found.");
+
+        var marker = Markers[index];
+        if (AbsDiff(marker.Time, newTime) <= MarkerEpsilon)
+            return this;
+
+        if (newTime <= TimeSpan.Zero || newTime >= Duration)
+            return new DomainError("MarkerOutOfRange", "Marker time must be strictly inside the timeline.");
+
+        var leftBound = index == 0 ? TimeSpan.Zero : Markers[index - 1].Time;
+        var rightBound = index == Markers.Count - 1 ? Duration : Markers[index + 1].Time;
+        if (newTime <= leftBound
+            || newTime >= rightBound
+            || AbsDiff(leftBound, newTime) <= MarkerEpsilon
+            || AbsDiff(rightBound, newTime) <= MarkerEpsilon)
+        {
+            return new DomainError(
+                "MarkerTooClose",
+                "Moving would cross or collide with an adjacent marker or timeline edge.");
+        }
+
+        var candidate = new Timeline(
+            Duration,
+            Markers.SetItem(index, marker with { Time = newTime }),
+            Segments,
+            Joins,
+            Settings);
+        if (candidate.GetTransitionFitError() is { } error)
+            return error;
+        return candidate;
+    }
+
+    /// <summary>
+    /// Null when edge fades and interior crossfades fit their caps; otherwise the blocking error.
+    /// </summary>
+    private DomainError? GetTransitionFitError()
+    {
+        if (Settings.FadeFromBlackSeconds is { } startFade)
+        {
+            var max = GetStartFadeCap();
+            if (startFade > max + 1e-9)
+            {
+                return new DomainError(
+                    "StartFadeOutOfRange",
+                    $"Moving would leave the start fade longer than the available {max:0.###}s.");
+            }
+        }
+
+        if (Settings.FadeToBlackSeconds is { } endFade)
+        {
+            var max = GetEndFadeCap();
+            if (endFade > max + 1e-9)
+            {
+                return new DomainError(
+                    "EndFadeOutOfRange",
+                    $"Moving would leave the end fade longer than the available {max:0.###}s.");
+            }
+        }
+
+        foreach (var run in GetDeletedRuns())
+        {
+            if (!run.IsInterior
+                || run.Join is not { Mode: TransitionMode.Crossfade, Crossfade: var crossfade }
+                || crossfade <= TimeSpan.Zero)
+            {
+                continue;
+            }
+
+            var cap = GetCrossfadeCap(run.Range);
+            if (crossfade > cap)
+            {
+                return new DomainError(
+                    "CrossfadeOutOfRange",
+                    $"Moving would make a crossfade exceed the available {cap.TotalSeconds:0.###}s cap.");
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Whether <see cref="MoveMarker"/> would succeed for this id and time.</summary>
+    public bool CanMoveMarker(MarkerId markerId, TimeSpan newTime) =>
+        GetMoveMarkerBlockReason(markerId, newTime) is null;
+
+    /// <summary>Human-readable reason <see cref="MoveMarker"/> would fail, or null if it would succeed.</summary>
+    public string? GetMoveMarkerBlockReason(MarkerId markerId, TimeSpan newTime) =>
+        MoveMarker(markerId, newTime).Match(
+            static _ => (string?)null,
+            static error => error.Message);
 
     /// <summary>
     /// Whether <see cref="RemoveMarker"/> would succeed for this id (not scene-detect, not a keep/delete boundary).
     /// </summary>
-    public bool CanRemoveMarker(Guid markerId) => GetRemoveMarkerBlockReason(markerId) is null;
+    public bool CanRemoveMarker(MarkerId markerId) => GetRemoveMarkerBlockReason(markerId) is null;
 
     /// <summary>Human-readable reason <see cref="RemoveMarker"/> would fail, or null if it would succeed.</summary>
-    public string? GetRemoveMarkerBlockReason(Guid markerId)
+    public string? GetRemoveMarkerBlockReason(MarkerId markerId)
     {
         var index = Markers.FindIndex(m => m.Id == markerId);
         if (index < 0)
@@ -195,22 +286,22 @@ public sealed class Timeline
         return null;
     }
 
-    public Result<Timeline> RemoveMarker(Guid markerId)
+    public Result<Timeline> RemoveMarker(MarkerId markerId)
     {
         var index = Markers.FindIndex(m => m.Id == markerId);
         if (index < 0)
-            return Fail<Timeline>("MarkerNotFound", "Marker was not found.");
+            return new DomainError("MarkerNotFound", "Marker was not found.");
 
         if (Markers[index].Source == MarkerSource.SceneDetect)
         {
-            return Fail<Timeline>(
+            return new DomainError(
                 "SceneMarkerProtected",
                 "Scene-detect markers cannot be deleted.");
         }
 
         if (Segments[index].IsDeleted != Segments[index + 1].IsDeleted)
         {
-            return Fail<Timeline>(
+            return new DomainError(
                 "MarkerIsBoundary",
                 "Cannot remove a marker that separates keep and delete segments.");
         }
@@ -218,20 +309,20 @@ public sealed class Timeline
         var oldRuns = SnapshotInteriorRuns();
         var newMarkers = Markers.RemoveAt(index);
         var newSegments = Segments.RemoveAt(index + 1);
-        return Ok(Rebuild(Duration, newMarkers, newSegments, oldRuns, Settings));
+        return Rebuild(Duration, newMarkers, newSegments, oldRuns, Settings);
     }
 
-    public Result<Timeline> DeleteBetween(Guid boundaryIdA, Guid boundaryIdB) =>
+    public Result<Timeline> DeleteBetween(MarkerId boundaryIdA, MarkerId boundaryIdB) =>
         ApplyDeletionFlags(boundaryIdA, boundaryIdB, deleted: true);
 
-    public Result<Timeline> RestoreBetween(Guid boundaryIdA, Guid boundaryIdB) =>
+    public Result<Timeline> RestoreBetween(MarkerId boundaryIdA, MarkerId boundaryIdB) =>
         ApplyDeletionFlags(boundaryIdA, boundaryIdB, deleted: false);
 
     /// <summary>
     /// True when the open range between the boundaries contains at least one segment whose
     /// deleted flag equals <paramref name="isDeleted"/>.
     /// </summary>
-    public bool RangeContainsSegment(Guid boundaryIdA, Guid boundaryIdB, bool isDeleted)
+    public bool RangeContainsSegment(MarkerId boundaryIdA, MarkerId boundaryIdB, bool isDeleted)
     {
         if (!TryGetBoundaryTime(boundaryIdA, out var timeA)
             || !TryGetBoundaryTime(boundaryIdB, out var timeB)
@@ -252,54 +343,54 @@ public sealed class Timeline
         return false;
     }
 
-    public Result<Timeline> RestoreDeletedRun(Guid deletedRunId)
+    public Result<Timeline> RestoreDeletedRun(DeletedRunId deletedRunId)
     {
         var run = GetDeletedRuns().FirstOrDefault(r => r.Id == deletedRunId);
         if (run is null)
-            return Fail<Timeline>("DeletedRunNotFound", "Deleted run was not found.");
+            return new DomainError("DeletedRunNotFound", "Deleted run was not found.");
 
         if (!TryGetBoundaryIdAt(run.Range.Start, out var left)
             || !TryGetBoundaryIdAt(run.Range.End, out var right))
-            return Fail<Timeline>("BoundaryNotFound", "Could not resolve deleted run boundaries.");
+            return new DomainError("BoundaryNotFound", "Could not resolve deleted run boundaries.");
 
         return RestoreBetween(left, right);
     }
 
-    public Result<Timeline> SetJoinHardCut(Guid deletedRunId)
+    public Result<Timeline> SetJoinHardCut(DeletedRunId deletedRunId)
     {
         var index = Joins.FindIndex(j => j.DeletedRunId == deletedRunId);
         if (index < 0)
-            return Fail<Timeline>("JoinNotFound", "Deleted run join was not found.");
+            return new DomainError("JoinNotFound", "Deleted run join was not found.");
 
-        var updated = Joins[index] with { Mode = TransitionMode.HardCut, CrossfadeSeconds = 0 };
-        return Ok(new Timeline(
-            Duration, Markers, Segments, Joins.SetItem(index, updated), Settings));
+        var updated = Joins[index] with { Mode = TransitionMode.HardCut, Crossfade = TimeSpan.Zero };
+        return new Timeline(
+            Duration, Markers, Segments, Joins.SetItem(index, updated), Settings);
     }
 
-    public Result<Timeline> SetJoinCrossfade(Guid deletedRunId, double seconds)
+    public Result<Timeline> SetJoinCrossfade(DeletedRunId deletedRunId, TimeSpan crossfade)
     {
         var index = Joins.FindIndex(j => j.DeletedRunId == deletedRunId);
         if (index < 0)
-            return Fail<Timeline>("JoinNotFound", "Deleted run join was not found.");
+            return new DomainError("JoinNotFound", "Deleted run join was not found.");
 
         var run = GetDeletedRuns().FirstOrDefault(r => r.Id == deletedRunId);
         if (run is null || !run.IsInterior)
-            return Fail<Timeline>("JoinNotInterior", "Crossfade requires an interior deleted run.");
+            return new DomainError("JoinNotInterior", "Crossfade requires an interior deleted run.");
 
         var cap = GetCrossfadeCap(run.Range);
-        if (cap <= 0)
-            return Fail<Timeline>("CrossfadeCapZero", "Adjacent kept sections are too short for a crossfade.");
+        if (cap <= TimeSpan.Zero)
+            return new DomainError("CrossfadeCapZero", "Adjacent kept sections are too short for a crossfade.");
 
-        if (seconds <= 0 || seconds > cap + 1e-9)
+        if (crossfade <= TimeSpan.Zero || crossfade > cap)
         {
-            return Fail<Timeline>(
+            return new DomainError(
                 "CrossfadeOutOfRange",
-                $"Crossfade must be in (0, {cap:0.###}] seconds.");
+                $"Crossfade must be in (0, {cap.TotalSeconds:0.###}] seconds.");
         }
 
-        var updated = Joins[index] with { Mode = TransitionMode.Crossfade, CrossfadeSeconds = seconds };
-        return Ok(new Timeline(
-            Duration, Markers, Segments, Joins.SetItem(index, updated), Settings));
+        var updated = Joins[index] with { Mode = TransitionMode.Crossfade, Crossfade = crossfade };
+        return new Timeline(
+            Duration, Markers, Segments, Joins.SetItem(index, updated), Settings);
     }
 
     /// <summary>Sets start fade; <paramref name="seconds"/> null disables fade-from-black.</summary>
@@ -310,14 +401,14 @@ public sealed class Timeline
             var max = GetStartFadeCap();
             if (value < 0 || value > max + 1e-9)
             {
-                return Fail<Timeline>(
+                return new DomainError(
                     "StartFadeOutOfRange",
                     $"Start fade must be between 0 and {max:0.###} seconds.");
             }
         }
 
         var settings = Settings with { FadeFromBlackSeconds = seconds };
-        return Ok(new Timeline(Duration, Markers, Segments, Joins, settings));
+        return new Timeline(Duration, Markers, Segments, Joins, settings);
     }
 
     /// <summary>Sets end fade; <paramref name="seconds"/> null disables fade-to-black.</summary>
@@ -328,76 +419,74 @@ public sealed class Timeline
             var max = GetEndFadeCap();
             if (value < 0 || value > max + 1e-9)
             {
-                return Fail<Timeline>(
+                return new DomainError(
                     "EndFadeOutOfRange",
                     $"End fade must be between 0 and {max:0.###} seconds.");
             }
         }
 
         var settings = Settings with { FadeToBlackSeconds = seconds };
-        return Ok(new Timeline(Duration, Markers, Segments, Joins, settings));
+        return new Timeline(Duration, Markers, Segments, Joins, settings);
     }
 
     public Result<ExportPlan> TryBuildExportPlan()
     {
         var kept = GetKeptRuns();
         if (kept.Count == 0)
-            return Fail<ExportPlan>("NothingToExport", "There is no kept material to export.");
+            return new DomainError("NothingToExport", "There is no kept material to export.");
 
         ImmutableList<TimeRange> clips = [.. kept];
         ImmutableList<DeletedRun> deleted = [.. GetDeletedRuns().Where(r => r.IsInterior)];
 
         if (clips.Count != deleted.Count + 1)
-            return Fail<ExportPlan>("InconsistentRuns", "Kept/deleted run topology is inconsistent.");
+            return new DomainError("InconsistentRuns", "Kept/deleted run topology is inconsistent.");
 
         var joins = ImmutableList.CreateBuilder<ExportJoin>();
         for (var i = 0; i < deleted.Count; i++)
         {
             var run = deleted[i];
-            var join = run.Join ?? new JoinTransition(run.Id, TransitionMode.HardCut, 0);
+            var join = run.Join ?? new JoinTransition(run.Id, TransitionMode.HardCut, TimeSpan.Zero);
             if (join.Mode == TransitionMode.Crossfade)
             {
-                var cap = Math.Min(clips[i].Duration.TotalSeconds, clips[i + 1].Duration.TotalSeconds);
-                if (join.CrossfadeSeconds <= 0 || join.CrossfadeSeconds > cap + 1e-9)
-                    return Fail<ExportPlan>("InvalidCrossfade", "A crossfade exceeds the adjacent kept duration cap.");
+                var cap = TimeSpans.Min(clips[i].Duration, clips[i + 1].Duration);
+                if (join.Crossfade <= TimeSpan.Zero || join.Crossfade > cap)
+                    return new DomainError("InvalidCrossfade", "A crossfade exceeds the adjacent kept duration cap.");
             }
 
             joins.Add(new ExportJoin(
                 join.Mode,
-                join.Mode == TransitionMode.Crossfade ? join.CrossfadeSeconds : 0));
+                join.Mode == TransitionMode.Crossfade ? join.Crossfade : TimeSpan.Zero));
         }
 
         if (Settings.FadeFromBlackSeconds is { } startFadeSeconds)
         {
             var max = GetStartFadeCap();
             if (startFadeSeconds < 0 || startFadeSeconds > max + 1e-9)
-                return Fail<ExportPlan>("InvalidStartFade", "Start fade exceeds the first kept section.");
+                return new DomainError("InvalidStartFade", "Start fade exceeds the first kept section.");
         }
 
         if (Settings.FadeToBlackSeconds is { } endFadeSeconds)
         {
             var max = GetEndFadeCap();
             if (endFadeSeconds < 0 || endFadeSeconds > max + 1e-9)
-                return Fail<ExportPlan>("InvalidEndFade", "End fade exceeds the final kept section.");
+                return new DomainError("InvalidEndFade", "End fade exceeds the final kept section.");
         }
 
-        return Ok(new ExportPlan(
+        return new ExportPlan(
             clips,
             joins.ToImmutable(),
             Settings.FadeFromBlackSeconds,
-            Settings.FadeToBlackSeconds));
+            Settings.FadeToBlackSeconds);
     }
 
-    public double GetCrossfadeCap(TimeRange deleted)
+    public TimeSpan GetCrossfadeCap(TimeRange deleted)
     {
         var kept = GetKeptRuns();
         var beforeIndex = kept.FindLastIndex(k => k.End <= deleted.Start + MarkerEpsilon);
         var afterIndex = kept.FindIndex(k => k.Start >= deleted.End - MarkerEpsilon);
         if (beforeIndex < 0 || afterIndex < 0)
-            return 0;
-        return Math.Min(
-            kept[beforeIndex].Duration.TotalSeconds,
-            kept[afterIndex].Duration.TotalSeconds);
+            return TimeSpan.Zero;
+        return TimeSpans.Min(kept[beforeIndex].Duration, kept[afterIndex].Duration);
     }
 
     /// <summary>
@@ -410,18 +499,17 @@ public sealed class Timeline
         if (kept.Count == 0)
             return 0;
 
-        var first = kept[0];
-        var available = first.Duration.TotalSeconds;
+        var available = kept[0].Duration;
 
         ImmutableList<DeletedRun> interiorDeleted = [.. GetDeletedRuns().Where(r => r.IsInterior)];
         if (kept.Count >= 2 && interiorDeleted.Count >= 1)
         {
             var outgoing = interiorDeleted[0].Join;
-            if (outgoing is { Mode: TransitionMode.Crossfade, CrossfadeSeconds: > 0 })
-                available -= outgoing.CrossfadeSeconds;
+            if (outgoing is { Mode: TransitionMode.Crossfade } join && join.Crossfade > TimeSpan.Zero)
+                available -= join.Crossfade;
         }
 
-        return Math.Max(0, available);
+        return TimeSpans.Max(TimeSpan.Zero, available).TotalSeconds;
     }
 
     /// <summary>
@@ -434,27 +522,82 @@ public sealed class Timeline
         if (kept.Count == 0)
             return 0;
 
-        var last = kept[^1];
-        var available = last.Duration.TotalSeconds;
+        var available = kept[^1].Duration;
 
         ImmutableList<DeletedRun> interiorDeleted = [.. GetDeletedRuns().Where(r => r.IsInterior)];
         if (kept.Count >= 2 && interiorDeleted.Count >= kept.Count - 1)
         {
             var incoming = interiorDeleted[kept.Count - 2].Join;
-            if (incoming is { Mode: TransitionMode.Crossfade, CrossfadeSeconds: > 0 })
-                available -= incoming.CrossfadeSeconds;
+            if (incoming is { Mode: TransitionMode.Crossfade } join && join.Crossfade > TimeSpan.Zero)
+                available -= join.Crossfade;
         }
 
-        return Math.Max(0, available);
+        return TimeSpans.Max(TimeSpan.Zero, available).TotalSeconds;
     }
 
-    private Result<Timeline> ApplyDeletionFlags(Guid boundaryIdA, Guid boundaryIdB, bool deleted)
+    /// <summary>
+    /// Source-time ranges of kept material consumed by edge fades and crossfades
+    /// (Edit-mode timeline shading).
+    /// </summary>
+    public ImmutableList<TimeRange> GetTransitionShadeRanges()
+    {
+        var kept = GetKeptRuns();
+        if (kept.Count == 0)
+            return [];
+
+        var ranges = ImmutableList.CreateBuilder<TimeRange>();
+
+        if (Settings.FadeFromBlackSeconds is > 0 and var fadeIn)
+        {
+            var first = kept[0];
+            var fade = TimeSpans.Min(TimeSpan.FromSeconds(fadeIn), first.Duration);
+            if (fade > TimeSpan.Zero)
+                ranges.Add(new TimeRange(first.Start, first.Start + fade));
+        }
+
+        if (Settings.FadeToBlackSeconds is > 0 and var fadeOut)
+        {
+            var last = kept[^1];
+            var fade = TimeSpans.Min(TimeSpan.FromSeconds(fadeOut), last.Duration);
+            if (fade > TimeSpan.Zero)
+                ranges.Add(new TimeRange(last.End - fade, last.End));
+        }
+
+        foreach (var run in GetDeletedRuns())
+        {
+            if (!run.IsInterior
+                || run.Join is not { Mode: TransitionMode.Crossfade, Crossfade: var crossfade }
+                || crossfade <= TimeSpan.Zero)
+            {
+                continue;
+            }
+
+            var beforeIndex = kept.FindLastIndex(k => k.End <= run.Range.Start + MarkerEpsilon);
+            var afterIndex = kept.FindIndex(k => k.Start >= run.Range.End - MarkerEpsilon);
+            if (beforeIndex < 0 || afterIndex < 0)
+                continue;
+
+            var before = kept[beforeIndex];
+            var beforeFade = TimeSpans.Min(crossfade, before.Duration);
+            if (beforeFade > TimeSpan.Zero)
+                ranges.Add(new TimeRange(before.End - beforeFade, before.End));
+
+            var after = kept[afterIndex];
+            var afterFade = TimeSpans.Min(crossfade, after.Duration);
+            if (afterFade > TimeSpan.Zero)
+                ranges.Add(new TimeRange(after.Start, after.Start + afterFade));
+        }
+
+        return ranges.ToImmutable();
+    }
+
+    private Result<Timeline> ApplyDeletionFlags(MarkerId boundaryIdA, MarkerId boundaryIdB, bool deleted)
     {
         if (!TryGetBoundaryTime(boundaryIdA, out var timeA) || !TryGetBoundaryTime(boundaryIdB, out var timeB))
-            return Fail<Timeline>("BoundaryNotFound", "One or both boundaries were not found.");
+            return new DomainError("BoundaryNotFound", "One or both boundaries were not found.");
 
         if (timeA >= timeB)
-            return Fail<Timeline>("InvalidRange", "Range start must be before end.");
+            return new DomainError("InvalidRange", "Range start must be before end.");
 
         var oldRuns = SnapshotInteriorRuns();
         var boundaries = GetBoundaries();
@@ -467,18 +610,18 @@ public sealed class Timeline
                 newSegments = newSegments.SetItem(i, new SegmentState(deleted));
         }
 
-        return Ok(Rebuild(Duration, Markers, newSegments, oldRuns, Settings));
+        return Rebuild(Duration, Markers, newSegments, oldRuns, Settings);
     }
 
-    private bool TryGetBoundaryTime(Guid id, out TimeSpan time)
+    private bool TryGetBoundaryTime(MarkerId id, out TimeSpan time)
     {
-        if (id == StartBoundId)
+        if (id == MarkerId.StartBound)
         {
             time = TimeSpan.Zero;
             return true;
         }
 
-        if (id == EndBoundId)
+        if (id == MarkerId.EndBound)
         {
             time = Duration;
             return true;
@@ -495,17 +638,17 @@ public sealed class Timeline
         return true;
     }
 
-    private bool TryGetBoundaryIdAt(TimeSpan time, out Guid id)
+    private bool TryGetBoundaryIdAt(TimeSpan time, out MarkerId id)
     {
         if (time <= TimeSpan.Zero)
         {
-            id = StartBoundId;
+            id = MarkerId.StartBound;
             return true;
         }
 
         if (time >= Duration)
         {
-            id = EndBoundId;
+            id = MarkerId.EndBound;
             return true;
         }
 
@@ -533,7 +676,7 @@ public sealed class Timeline
                 range,
                 i < Joins.Count
                     ? Joins[i]
-                    : new JoinTransition(Guid.NewGuid(), TransitionMode.HardCut, 0)))
+                    : new JoinTransition(DeletedRunId.New(), TransitionMode.HardCut, TimeSpan.Zero)))
         ];
     }
 
@@ -594,16 +737,16 @@ public sealed class Timeline
 
                 var join = isOneToOne
                     ? overlappingOld[0].Join
-                    : new JoinTransition(Guid.NewGuid(), TransitionMode.HardCut, 0);
+                    : new JoinTransition(DeletedRunId.New(), TransitionMode.HardCut, TimeSpan.Zero);
 
                 if (join.Mode != TransitionMode.Crossfade)
                     return join;
 
                 var cap = probe.GetCrossfadeCap(range);
-                if (cap <= 0 || join.CrossfadeSeconds <= 0)
-                    return join with { Mode = TransitionMode.HardCut, CrossfadeSeconds = 0 };
-                if (join.CrossfadeSeconds > cap)
-                    return join with { CrossfadeSeconds = cap };
+                if (cap <= TimeSpan.Zero || join.Crossfade <= TimeSpan.Zero)
+                    return join with { Mode = TransitionMode.HardCut, Crossfade = TimeSpan.Zero };
+                if (join.Crossfade > cap)
+                    return join with { Crossfade = cap };
                 return join;
             })
         ];

@@ -7,8 +7,8 @@ public class AbridgedTimelineLayoutTests
     [Fact]
     public void FromPlanMatchesPreviewTimeMapDurationAndMapsJoins()
     {
-        var xfId = Guid.NewGuid();
-        var cutId = Guid.NewGuid();
+        var xfId = DeletedRunId.New();
+        var cutId = DeletedRunId.New();
 
         var plan = new ExportPlan(
             [
@@ -17,8 +17,8 @@ public class AbridgedTimelineLayoutTests
                 new TimeRange(TimeSpan.FromSeconds(40), TimeSpan.FromSeconds(50))
             ],
             [
-                new ExportJoin(TransitionMode.Crossfade, 2),
-                new ExportJoin(TransitionMode.HardCut, 0)
+                new ExportJoin(TransitionMode.Crossfade, TimeSpan.FromSeconds(2)),
+                new ExportJoin(TransitionMode.HardCut, TimeSpan.Zero)
             ],
             FadeFromBlackSeconds: 1.5,
             FadeToBlackSeconds: 1.0);
@@ -69,7 +69,7 @@ public class AbridgedTimelineLayoutTests
 
         var runs = timeline.GetDeletedRuns().Where(r => r.IsInterior).ToList();
         runs.Should().HaveCount(2);
-        timeline = timeline.SetJoinCrossfade(runs[0].Id, 1.0).RequireOk();
+        timeline = timeline.SetJoinCrossfade(runs[0].Id, TimeSpan.FromSeconds(1.0)).RequireOk();
 
         var layout = AbridgedTimelineLayout.FromTimeline(timeline);
         layout.Overlays.Where(IsInterior(TransitionMode.Crossfade, runs[0].Id)).Should().ContainSingle();
@@ -96,7 +96,7 @@ public class AbridgedTimelineLayoutTests
     private static Func<AbridgedOverlay, bool> IsExterior(ExteriorOverlayKind kind) =>
         overlay => overlay.Value is ExteriorOverlay exterior && exterior.Kind == kind;
 
-    private static Func<AbridgedOverlay, bool> IsInterior(TransitionMode mode, Guid deletedRunId) =>
+    private static Func<AbridgedOverlay, bool> IsInterior(TransitionMode mode, DeletedRunId deletedRunId) =>
         overlay => overlay.Value is InteriorOverlay interior
             && interior.Mode == mode
             && interior.DeletedRunId == deletedRunId;

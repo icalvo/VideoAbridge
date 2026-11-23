@@ -9,8 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Edit → Move Marker to Playhead (`Ctrl+M`): with 1–2 markers selected, moves the nearest manual marker to the playhead when playback is stopped and the move stays legal (including existing crossfade / edge-fade caps).
+- File Explorer **Abridge...** context menu for video files (Chocolatey registers it by default; `/NoExplorerContextMenu` skips). Help → Add/Remove File Explorer context menu toggles it for the current user.
 - Chocolatey package `videoabridge` (downloads the GitHub Release zip; depends on `ffmpeg`); release workflow packs and pushes it via `CHOCOLATEY_API_KEY`.
 - MIT `LICENSE`.
+- Edit mode: darker green shading on kept sections that participate in a crossfade or edge fade.
+
+### Changed
+
+- Keep-segment duration labels under the edit timeline cover start→first marker and last marker→end (as well as between markers), and hide when the gap is too narrow to fit the text.
+- Timeline horizontal scrollbar overlays the timeline (no viewport shrink / zoom jump when it appears). Scrollbars and text boxes use dark styling to match the app.
 
 ## [2026.11.7] - 2026-11-21
 

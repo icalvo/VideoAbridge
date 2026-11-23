@@ -28,7 +28,7 @@ public static class FileContentId
         var fullPath = Path.GetFullPath(filePath);
         var info = new FileInfo(fullPath);
         if (!info.Exists)
-            return Fail<string>("FileNotFound", "Video file was not found.");
+            return new DomainError("FileNotFound", "Video file was not found.");
 
         var length = info.Length;
         var hash = new XxHash128();
@@ -57,7 +57,7 @@ public static class FileContentId
         BinaryPrimitives.WriteInt64LittleEndian(meta, DurationKeyMilliseconds(durationSeconds));
         hash.Append(meta);
 
-        return Ok(Convert.ToHexString(hash.GetHashAndReset()).ToUpperInvariant());
+        return Convert.ToHexString(hash.GetHashAndReset()).ToUpperInvariant();
     }
 
     public static long DurationKeyMilliseconds(double durationSeconds) =>

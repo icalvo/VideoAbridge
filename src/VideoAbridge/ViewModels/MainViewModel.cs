@@ -61,9 +61,8 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _statusBarText = "Open a video to begin.";
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private bool _isExporting;
-    [ObservableProperty] private Guid? _selectedDeletedRunId;
-    [ObservableProperty] private TimelineFocusKind _timelineFocusKind = TimelineFocusKind.None;
-    [ObservableProperty] private Guid? _focusedTimelineItemId;
+    [ObservableProperty] private DeletedRunId? _selectedDeletedRunId;
+    [ObservableProperty] private TimelineItemId? _focusedTimelineItemId;
     private TimeSpan _focusedTimelineItemTime;
     [ObservableProperty] private double _selectedCrossfadeSeconds;
     [ObservableProperty] private double _selectedCrossfadeCap;
@@ -82,7 +81,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     public bool ShowEditChrome => !IsPreviewMode;
 
     public bool HasSelectedJoin =>
-        SelectedDeletedRunId is Guid id
+        SelectedDeletedRunId is { } id
         && Timeline?.GetDeletedRuns().FirstOrDefault(r => r.Id == id) is { IsInterior: true, Join: not null };
 
     public AbridgedTimelineLayout? AbridgedLayout => _abridgedLayout;
@@ -105,7 +104,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     public VideoPlayerService Player => _player;
 
     public ObservableCollection<MarkerThumbViewModel> MarkerThumbs { get; } = [];
-    public ObservableCollection<Guid> SelectedMarkerIds { get; } = [];
+    public ObservableCollection<MarkerId> SelectedMarkerIds { get; } = [];
     public ObservableCollection<LongTaskItem> Tasks { get; } = [];
     public ObservableCollection<VersionTabViewModel> VersionTabs { get; } = [];
     public ObservableCollection<RecentFileItem> RecentFiles { get; } = [];
@@ -186,6 +185,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     private void NotifyTimelineActionCommands()
     {
         AddMarkerAtPlayheadCommand.NotifyCanExecuteChanged();
+        MoveMarkerToPlayheadCommand.NotifyCanExecuteChanged();
         DeleteMarkerCommand.NotifyCanExecuteChanged();
         DeleteSectionCommand.NotifyCanExecuteChanged();
         RestoreSectionCommand.NotifyCanExecuteChanged();
@@ -212,6 +212,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     private void NotifyCommandTooltips()
     {
         OnPropertyChanged(nameof(AddMarkerToolTip));
+        OnPropertyChanged(nameof(MoveMarkerToPlayheadToolTip));
         OnPropertyChanged(nameof(DeleteMarkerToolTip));
         OnPropertyChanged(nameof(DetectScenesToolTip));
         OnPropertyChanged(nameof(DeleteSectionToolTip));
@@ -311,7 +312,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         RefreshStatusBar();
     }
 
-    partial void OnSelectedDeletedRunIdChanged(Guid? value)
+    partial void OnSelectedDeletedRunIdChanged(DeletedRunId? value)
     {
         OnPropertyChanged(nameof(HasSelectedJoin));
         RestoreSectionCommand.NotifyCanExecuteChanged();
@@ -400,6 +401,8 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         CaptureActiveViewState();
         PersistMarkerCache(force: false);
     }
+
+    partial void OnIsPlayingChanged(bool value) => NotifyTimelineActionCommands();
 
     /// <summary>Called by MainWindow when the timeline scrollbar moves.</summary>
     public void ReportTimelineVisibleStart(double visibleStartSeconds)
@@ -527,7 +530,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         BeginInlineRename(_versionSet.ActiveVersionId);
     }
 
-    internal void BeginInlineRename(Guid versionId)
+    internal void BeginInlineRename(VersionId versionId)
     {
         if (!CanManageVersions())
             return;
@@ -583,7 +586,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    internal void ReorderVersion(Guid versionId, int newIndex)
+    internal void ReorderVersion(VersionId versionId, int newIndex)
     {
         if (_versionSet is null || !CanManageVersions())
             return;
@@ -599,7 +602,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand(CanExecute = nameof(CanSelectVersion))]
-    private void SelectVersion(Guid versionId)
+    private void SelectVersion(VersionId versionId)
     {
         if (_versionSet is null || versionId == _versionSet.ActiveVersionId)
             return;
@@ -644,7 +647,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand(CanExecute = nameof(CanDeleteVersion))]
-    private void DeleteVersion(Guid versionId)
+    private void DeleteVersion(VersionId versionId)
     {
         if (_versionSet is null)
             return;
@@ -842,14 +845,14 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         if (Timeline is null)
             return;
 
-        var id = Guid.NewGuid();
+        var id = MarkerId.New();
         Apply(Timeline.AddMarker(Playhead, MarkerSource.User, id));
         if (Timeline is null || Timeline.Markers.All(m => m.Id != id))
             return;
 
         ClearMarkerSelection();
         SelectedMarkerIds.Add(id);
-        SetTimelineFocus(TimelineFocusKind.Marker, id);
+        SetTimelineFocus(id);
     }
 
     private bool CanAddMarkerAtPlayhead() => GetAddMarkerBlockReason() is null;
@@ -867,12 +870,12 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         return null;
     }
 
-    public void ToggleMarkerSelection(Guid markerId, bool extendSelection = false)
+    public void ToggleMarkerSelection(MarkerId markerId, bool extendSelection = false)
     {
         SelectedDeletedRunId = null;
-        SetTimelineFocus(TimelineFocusKind.Marker, markerId);
+        SetTimelineFocus(markerId);
 
-        IReadOnlyDictionary<Guid, TimeSpan> markerTimes = Timeline is null
+        IReadOnlyDictionary<MarkerId, TimeSpan> markerTimes = Timeline is null
             ? []
             : Timeline.Markers.ToDictionary(m => m.Id, m => m.Time);
 
@@ -914,13 +917,13 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public void ActivateTimelineFocus(bool extendSelection)
     {
-        if (IsPreviewMode || Timeline is null || FocusedTimelineItemId is not Guid id)
+        if (IsPreviewMode || Timeline is null || FocusedTimelineItemId is not { } focus)
             return;
 
-        if (TimelineFocusKind == TimelineFocusKind.Marker)
-            ToggleMarkerSelection(id, extendSelection);
-        else if (TimelineFocusKind == TimelineFocusKind.DeletedRun)
-            SelectDeletedRun(id);
+        if (focus is MarkerId markerId)
+            ToggleMarkerSelection(markerId, extendSelection);
+        else if (focus is DeletedRunId runId)
+            SelectDeletedRun(runId);
     }
 
     public void ResetTimelineFocusToPlayhead()
@@ -936,40 +939,26 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             TimelineFocusNavigation.NearestToTime(Playhead, markers, runs));
     }
 
-    private void SetTimelineFocus(TimelineFocusKind kind, Guid id)
+    private void SetTimelineFocus(TimelineItemId? target)
     {
-        if (kind == TimelineFocusKind.None)
+        if (target is null)
         {
             ClearTimelineFocus();
             return;
         }
 
-        TimelineFocusKind = kind;
-        FocusedTimelineItemId = id;
-        _focusedTimelineItemTime = ResolveFocusTime(kind, id) ?? _focusedTimelineItemTime;
+        FocusedTimelineItemId = target;
+        _focusedTimelineItemTime = ResolveFocusTime(target.Value) ?? _focusedTimelineItemTime;
     }
 
-    private void SetTimelineFocusTarget(TimelineFocusTarget target)
-    {
-        if (target.IsNone)
-        {
-            ClearTimelineFocus();
-            return;
-        }
-
-        SetTimelineFocus(target.Kind, target.Id);
-    }
+    private void SetTimelineFocusTarget(TimelineItemId? target) => SetTimelineFocus(target);
 
     private void ClearTimelineFocus()
     {
-        TimelineFocusKind = TimelineFocusKind.None;
         FocusedTimelineItemId = null;
     }
 
-    private TimelineFocusTarget GetTimelineFocusTarget() =>
-        FocusedTimelineItemId is Guid id && TimelineFocusKind != TimelineFocusKind.None
-            ? new TimelineFocusTarget(TimelineFocusKind, id)
-            : TimelineFocusTarget.None;
+    private TimelineItemId? GetTimelineFocusTarget() => FocusedTimelineItemId;
 
     private void SyncTimelineFocusToTimeline()
     {
@@ -981,33 +970,35 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
 
         var (markers, runs) = BuildFocusLanes();
         var current = GetTimelineFocusTarget();
-        if (current.IsNone)
+        if (current is null)
         {
             SetTimelineFocusTarget(
                 TimelineFocusNavigation.NearestToTime(Playhead, markers, runs));
             return;
         }
 
-        var stillThere = current.Kind == TimelineFocusKind.Marker
-            ? markers.Any(m => m.Id == current.Id)
-            : runs.Any(r => r.Id == current.Id);
+        var focus = current.Value;
+        var stillThere = focus switch
+        {
+            MarkerId => markers.Any(m => m.Id == focus),
+            DeletedRunId => runs.Any(r => r.Id == focus),
+        };
 
         if (stillThere)
         {
-            _focusedTimelineItemTime = ResolveFocusTime(current.Kind, current.Id)
-                ?? _focusedTimelineItemTime;
+            _focusedTimelineItemTime = ResolveFocusTime(focus) ?? _focusedTimelineItemTime;
             return;
         }
 
         SetTimelineFocusTarget(
             TimelineFocusNavigation.AfterRemoval(
-                current,
+                focus,
                 _focusedTimelineItemTime,
                 markers,
                 runs));
     }
 
-    private (IReadOnlyList<(Guid Id, TimeSpan Time)> Markers, IReadOnlyList<(Guid Id, TimeSpan Time)> Runs)
+    private (IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> Markers, IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> Runs)
         BuildFocusLanes()
     {
         if (Timeline is null)
@@ -1015,27 +1006,28 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
 
         var markers = Timeline.Markers
             .OrderBy(m => m.Time)
-            .Select(m => (m.Id, m.Time))
+            .Select(m => ((TimelineItemId)m.Id, m.Time))
             .ToList();
         var runs = Timeline.GetDeletedRuns()
             .OrderBy(r => r.Range.Start)
-            .Select(r => (r.Id, r.Range.Start))
+            .Select(r => ((TimelineItemId)r.Id, r.Range.Start))
             .ToList();
         return (markers, runs);
     }
 
-    private TimeSpan? ResolveFocusTime(TimelineFocusKind kind, Guid id)
+    private TimeSpan? ResolveFocusTime(TimelineItemId focus)
     {
         if (Timeline is null)
             return null;
 
-        if (kind == TimelineFocusKind.Marker)
-            return Timeline.Markers.FirstOrDefault(m => m.Id == id)?.Time;
-
-        return Timeline.GetDeletedRuns().FirstOrDefault(r => r.Id == id)?.Range.Start;
+        return focus switch
+        {
+            MarkerId markerId => Timeline.Markers.FirstOrDefault(m => m.Id == markerId)?.Time,
+            DeletedRunId runId => Timeline.GetDeletedRuns().FirstOrDefault(r => r.Id == runId)?.Range.Start,
+        };
     }
 
-    private void SeekPlayheadToMarker(Guid markerId)
+    private void SeekPlayheadToMarker(MarkerId markerId)
     {
         if (Timeline is null)
             return;
@@ -1045,6 +1037,64 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
 
         SeekPlayhead(marker.Time);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanMoveMarkerToPlayhead))]
+    private void MoveMarkerToPlayhead()
+    {
+        if (Timeline is null || !TryGetNearestSelectedManualMarker(out var marker))
+            return;
+
+        Apply(Timeline.MoveMarker(marker.Id, Playhead));
+    }
+
+    private bool CanMoveMarkerToPlayhead() => GetMoveMarkerToPlayheadBlockReason() is null;
+
+    public string? MoveMarkerToPlayheadToolTip => GetMoveMarkerToPlayheadBlockReason();
+
+    private string? GetMoveMarkerToPlayheadBlockReason()
+    {
+        if (Timeline is null)
+            return "Open a video to begin.";
+        if (IsPlaying)
+            return "Stop playback to move a marker.";
+        if (SelectedMarkerIds.Count is not (1 or 2))
+            return "Select one or two markers (moves the nearest manual marker).";
+        if (!TryGetNearestSelectedManualMarker(out var marker))
+            return "Select at least one manual marker to move.";
+        if (AbsDiff(marker.Time, Playhead) <= Timeline.MarkerEpsilon)
+            return "Marker is already at the playhead.";
+
+        return Timeline.GetMoveMarkerBlockReason(marker.Id, Playhead);
+    }
+
+    /// <summary>
+    /// Among the current 1–2 selected markers, the manual marker closest to the playhead.
+    /// </summary>
+    private bool TryGetNearestSelectedManualMarker([NotNullWhen(true)] out Marker? marker)
+    {
+        marker = null;
+        if (Timeline is null || SelectedMarkerIds.Count is not (1 or 2))
+            return false;
+
+        Marker? nearest = null;
+        var bestDistance = TimeSpan.MaxValue;
+        foreach (var id in SelectedMarkerIds)
+        {
+            var candidate = Timeline.Markers.FirstOrDefault(m => m.Id == id);
+            if (candidate is null || candidate.Source != MarkerSource.User)
+                continue;
+
+            var distance = AbsDiff(candidate.Time, Playhead);
+            if (nearest is not null && distance >= bestDistance)
+                continue;
+
+            nearest = candidate;
+            bestDistance = distance;
+        }
+
+        marker = nearest;
+        return nearest is not null;
     }
 
     [RelayCommand(CanExecute = nameof(CanDeleteMarker))]
@@ -1101,7 +1151,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         if (Timeline is null)
             return;
 
-        if (SelectedDeletedRunId is Guid runId)
+        if (SelectedDeletedRunId is { } runId)
         {
             Apply(Timeline.RestoreDeletedRun(runId));
             SelectedDeletedRunId = null;
@@ -1122,7 +1172,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         if (Timeline is null)
             return "Open a video to begin.";
-        if (SelectedDeletedRunId is Guid runId)
+        if (SelectedDeletedRunId is { } runId)
         {
             return Timeline.GetDeletedRuns().Any(r => r.Id == runId)
                 ? null
@@ -1142,7 +1192,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         if (Timeline is null || !TryGetLeftmostSelectedMarkerId(out var left))
             return;
 
-        Apply(Timeline.DeleteBetween(Timeline.StartBoundId, left));
+        Apply(Timeline.DeleteBetween(MarkerId.StartBound, left));
     }
 
     private bool CanDeleteSectionFromStart() => GetDeleteSectionFromStartBlockReason() is null;
@@ -1155,7 +1205,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             return "Open a video to begin.";
         if (!TryGetLeftmostSelectedMarkerId(out var left))
             return "Select one or two markers.";
-        if (!Timeline.RangeContainsSegment(Timeline.StartBoundId, left, isDeleted: false))
+        if (!Timeline.RangeContainsSegment(MarkerId.StartBound, left, isDeleted: false))
             return "Everything before the selection is already deleted.";
         return null;
     }
@@ -1166,7 +1216,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         if (Timeline is null || !TryGetRightmostSelectedMarkerId(out var right))
             return;
 
-        Apply(Timeline.DeleteBetween(right, Timeline.EndBoundId));
+        Apply(Timeline.DeleteBetween(right, MarkerId.EndBound));
     }
 
     private bool CanDeleteSectionToEnd() => GetDeleteSectionToEndBlockReason() is null;
@@ -1179,7 +1229,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             return "Open a video to begin.";
         if (!TryGetRightmostSelectedMarkerId(out var right))
             return "Select one or two markers.";
-        if (!Timeline.RangeContainsSegment(right, Timeline.EndBoundId, isDeleted: false))
+        if (!Timeline.RangeContainsSegment(right, MarkerId.EndBound, isDeleted: false))
             return "Everything after the selection is already deleted.";
         return null;
     }
@@ -1190,7 +1240,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         if (Timeline is null || !TryGetLeftmostSelectedMarkerId(out var left))
             return;
 
-        Apply(Timeline.RestoreBetween(Timeline.StartBoundId, left));
+        Apply(Timeline.RestoreBetween(MarkerId.StartBound, left));
     }
 
     private bool CanRestoreSectionFromStart() => GetRestoreSectionFromStartBlockReason() is null;
@@ -1203,7 +1253,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             return "Open a video to begin.";
         if (!TryGetLeftmostSelectedMarkerId(out var left))
             return "Select one or two markers.";
-        if (!Timeline.RangeContainsSegment(Timeline.StartBoundId, left, isDeleted: true))
+        if (!Timeline.RangeContainsSegment(MarkerId.StartBound, left, isDeleted: true))
             return "Nothing before the selection is deleted.";
         return null;
     }
@@ -1214,7 +1264,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         if (Timeline is null || !TryGetRightmostSelectedMarkerId(out var right))
             return;
 
-        Apply(Timeline.RestoreBetween(right, Timeline.EndBoundId));
+        Apply(Timeline.RestoreBetween(right, MarkerId.EndBound));
     }
 
     private bool CanRestoreSectionToEnd() => GetRestoreSectionToEndBlockReason() is null;
@@ -1227,12 +1277,12 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             return "Open a video to begin.";
         if (!TryGetRightmostSelectedMarkerId(out var right))
             return "Select one or two markers.";
-        if (!Timeline.RangeContainsSegment(right, Timeline.EndBoundId, isDeleted: true))
+        if (!Timeline.RangeContainsSegment(right, MarkerId.EndBound, isDeleted: true))
             return "Nothing after the selection is deleted.";
         return null;
     }
 
-    private bool TryGetOrderedSelectedMarkerIds(out Guid left, out Guid right)
+    private bool TryGetOrderedSelectedMarkerIds(out MarkerId left, out MarkerId right)
     {
         left = default;
         right = default;
@@ -1253,7 +1303,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         return true;
     }
 
-    private bool TryGetLeftmostSelectedMarkerId(out Guid id)
+    private bool TryGetLeftmostSelectedMarkerId(out MarkerId id)
     {
         id = default;
         if (Timeline is null || SelectedMarkerIds.Count == 0)
@@ -1271,7 +1321,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         return true;
     }
 
-    private bool TryGetRightmostSelectedMarkerId(out Guid id)
+    private bool TryGetRightmostSelectedMarkerId(out MarkerId id)
     {
         id = default;
         if (Timeline is null || SelectedMarkerIds.Count == 0)
@@ -1292,11 +1342,11 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     private static TimeSpan AbsDiff(TimeSpan a, TimeSpan b) => a > b ? a - b : b - a;
 
     [RelayCommand]
-    private void SelectDeletedRun(Guid runId)
+    private void SelectDeletedRun(DeletedRunId runId)
     {
         SelectedDeletedRunId = runId;
         SelectedMarkerIds.Clear();
-        SetTimelineFocus(TimelineFocusKind.DeletedRun, runId);
+        SetTimelineFocus(runId);
         RefreshSelectionFromTimeline();
     }
 
@@ -1332,17 +1382,18 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
 
         if (seconds <= 1e-9)
         {
-            if (join.Mode == TransitionMode.HardCut && join.CrossfadeSeconds <= 1e-9)
+            if (join.Mode == TransitionMode.HardCut && join.Crossfade <= TimeSpan.Zero)
                 return;
             Apply(Timeline.SetJoinHardCut(runId));
             return;
         }
 
+        var crossfade = TimeSpan.FromSeconds(seconds);
         if (join.Mode == TransitionMode.Crossfade
-            && Math.Abs(join.CrossfadeSeconds - seconds) < 1e-9)
+            && Math.Abs(join.Crossfade.TotalSeconds - seconds) < 1e-9)
             return;
 
-        Apply(Timeline.SetJoinCrossfade(runId, seconds));
+        Apply(Timeline.SetJoinCrossfade(runId, crossfade));
     }
 
     private void CommitStartFade(double value)
@@ -1884,8 +1935,8 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         SetActiveTimeline(timeline);
         PruneSelectedMarkers();
-        if (SelectedDeletedRunId is Guid runId
-            && Timeline!.GetDeletedRuns().All(r => r.Id != runId))
+        if (SelectedDeletedRunId is { } runId
+            && timeline.GetDeletedRuns().All(r => r.Id != runId))
         {
             SelectedDeletedRunId = null;
         }
@@ -2049,7 +2100,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             return false;
 
         // Same skip rules as AddMarker: ignore out-of-range / too-close without failing the run.
-        var id = Guid.NewGuid();
+        var id = MarkerId.New();
         var added = false;
         _versionSet.AddSharedSceneMarker(time, id).Match(
             next =>
@@ -2218,7 +2269,12 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             _editView = entry?.EditView is { } edit
-                ? CloneView(edit)!
+                ? new TimelineViewStateDto
+                {
+                    PixelsPerSecond = edit.PixelsPerSecond,
+                    VisibleStartSeconds = edit.VisibleStartSeconds,
+                    PlayheadSeconds = edit.PlayheadSeconds
+                }
                 : new TimelineViewStateDto
                 {
                     PixelsPerSecond = entry?.PixelsPerSecond is { } legacy && legacy > 0 ? legacy : PixelsPerSecond,
@@ -2263,7 +2319,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     private async Task EnsureMarkerThumbnailAsync(
-        Guid markerId,
+        MarkerId markerId,
         TimeSpan time,
         string path,
         TimeSpan duration,
@@ -2771,9 +2827,9 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             SelectedCrossfadeSeconds = run.Join.Mode == TransitionMode.Crossfade
-                ? run.Join.CrossfadeSeconds
+                ? run.Join.Crossfade.TotalSeconds
                 : 0;
-            SelectedCrossfadeCap = Timeline.GetCrossfadeCap(run.Range);
+            SelectedCrossfadeCap = Timeline.GetCrossfadeCap(run.Range).TotalSeconds;
         }
         finally
         {

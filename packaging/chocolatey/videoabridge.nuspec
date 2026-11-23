@@ -33,6 +33,12 @@ It is not a general NLE and not a multi-clip editor. You open one finished cut, 
 ## Requirements
 
 This package depends on the Chocolatey `ffmpeg` package (ffmpeg and ffprobe on PATH).
+
+## Package Parameters
+
+* `/NoExplorerContextMenu` - Do not register the File Explorer **Abridge...** context menu for video files (registered by default).
+
+Example: `choco install videoabridge --params="'/NoExplorerContextMenu'"`
 ]]></description>
     <releaseNotes>https://github.com/icalvo/VideoAbridge/blob/main/CHANGELOG.md</releaseNotes>
     <dependencies>

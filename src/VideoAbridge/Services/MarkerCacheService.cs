@@ -130,7 +130,7 @@ internal sealed class MarkerCacheService
             FileHash = fileHash,
             DurationSeconds = versionSet.Duration.TotalSeconds,
             SceneDetectPositionSeconds = Math.Max(0, versionSet.SceneDetectPosition.TotalSeconds),
-            ActiveVersionId = versionSet.ActiveVersionId,
+            ActiveVersionId = versionSet.ActiveVersionId.Value,
             Versions =
             [
                 .. versionSet.Versions.Select(v =>
@@ -138,7 +138,7 @@ internal sealed class MarkerCacheService
                     var doc = ProjectDocument.FromTimeline("", v.Timeline);
                     return new VersionCacheDto
                     {
-                        Id = v.Id,
+                        Id = v.Id.Value,
                         Name = v.Name,
                         Markers = [.. doc.Markers],
                         SegmentDeleted = [.. doc.SegmentDeleted],
@@ -189,24 +189,29 @@ internal sealed class MarkerCacheService
             .. entry.Versions.Select(dto => (Dto: dto, Timeline: RestoreVersionTimeline(dto, probedDuration)))
         ];
 
-        if (restored.Count == 0 || restored.Any(v => v.Timeline is null))
+        if (restored.Count == 0)
             return null;
 
-        ImmutableList<AbridgedVersion> versions =
-        [
-            .. restored.Select(item =>
-            {
-                var name = string.IsNullOrWhiteSpace(item.Dto.Name)
-                    ? AbridgedVersionSet.DefaultVersionName
-                    : item.Dto.Name;
-                return new AbridgedVersion(
-                    item.Dto.Id == Guid.Empty ? Guid.NewGuid() : item.Dto.Id,
-                    name,
-                    item.Timeline!);
-            })
-        ];
+        var versionsBuilder = ImmutableList.CreateBuilder<AbridgedVersion>();
+        foreach (var item in restored)
+        {
+            if (item.Timeline is not { } timeline)
+                return null;
 
-        var activeId = entry.ActiveVersionId;
+            var name = string.IsNullOrWhiteSpace(item.Dto.Name)
+                ? AbridgedVersionSet.DefaultVersionName
+                : item.Dto.Name;
+            versionsBuilder.Add(new AbridgedVersion(
+                item.Dto.Id == Guid.Empty ? VersionId.New() : VersionId.From(item.Dto.Id),
+                name,
+                timeline));
+        }
+
+        ImmutableList<AbridgedVersion> versions = versionsBuilder.ToImmutable();
+
+        var activeId = entry.ActiveVersionId == Guid.Empty
+            ? versions[0].Id
+            : VersionId.From(entry.ActiveVersionId);
         if (versions.All(v => v.Id != activeId))
             activeId = versions[0].Id;
 
@@ -281,12 +286,13 @@ internal sealed class MarkerCacheService
                 }
 
                 return timeline.GetDeletedRuns()
-                    .Where(r => r.IsInterior && r.Join is { Mode: TransitionMode.Crossfade })
+                    .Where(r => r.IsInterior)
                     .Aggregate(
                         timeline,
-                        (current, run) =>
-                            current.SetJoinCrossfade(run.Id, run.Join!.CrossfadeSeconds)
-                                .Match(next => next, _ => current));
+                        (current, run) => run.Join is { Mode: TransitionMode.Crossfade } join
+                            ? current.SetJoinCrossfade(run.Id, join.Crossfade)
+                                .Match(next => next, _ => current)
+                            : current);
             },
             _ => null);
     }

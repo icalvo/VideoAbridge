@@ -1,7 +1,8 @@
 namespace VideoAbridge.Core.Outcome;
 
 /// <summary>Success or <see cref="DomainError"/>, consumed via Match / Map / Bind.</summary>
-public readonly union Result<T>(Ok<T>, DomainError) : IEquatable<Result<T>>
+public readonly union Result<T>(T, DomainError) : IEquatable<Result<T>>
+    where T : notnull
 {
     public readonly TResult Match<TResult>(Func<T, TResult> onSuccess, Func<DomainError, TResult> onError)
     {
@@ -9,8 +10,8 @@ public readonly union Result<T>(Ok<T>, DomainError) : IEquatable<Result<T>>
         ArgumentNullException.ThrowIfNull(onError);
         return this switch
         {
-            Ok<T> ok => onSuccess(ok.Value),
-            DomainError error => onError(error)
+            DomainError error => onError(error),
+            T value => onSuccess(value)
         };
     }
 
@@ -32,21 +33,23 @@ public readonly union Result<T>(Ok<T>, DomainError) : IEquatable<Result<T>>
     }
 
     public readonly Result<TOut> Map<TOut>(Func<T, TOut> map)
+        where TOut : notnull
     {
         ArgumentNullException.ThrowIfNull(map);
-        return Match(value => Results.Ok(map(value)), Results.Fail<TOut>);
+        return Match<Result<TOut>>(value => map(value), static error => error);
     }
 
     public readonly Result<T> MapError(Func<DomainError, DomainError> map)
     {
         ArgumentNullException.ThrowIfNull(map);
-        return Match(Results.Ok, error => Results.Fail<T>(map(error)));
+        return Match<Result<T>>(static value => value, error => map(error));
     }
 
     public readonly Result<TOut> Bind<TOut>(Func<T, Result<TOut>> bind)
+        where TOut : notnull
     {
         ArgumentNullException.ThrowIfNull(bind);
-        return Match(bind, Results.Fail<TOut>);
+        return Match<Result<TOut>>(bind, static error => error);
     }
 
     public readonly bool Equals(Result<T> other) =>

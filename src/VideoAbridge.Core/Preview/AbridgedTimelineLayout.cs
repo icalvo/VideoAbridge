@@ -25,14 +25,14 @@ public sealed class AbridgedTimelineLayout
     /// </summary>
     public static AbridgedTimelineLayout FromPlan(
         ExportPlan plan,
-        ImmutableList<Guid>? joinDeletedRunIds = null)
+        ImmutableList<DeletedRunId>? joinDeletedRunIds = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         if (plan.Clips.Count == 0)
             return Empty;
 
         var overlays = ImmutableList.CreateBuilder<AbridgedOverlay>();
-        var outPos = 0.0;
+        var outPos = TimeSpan.Zero;
         var clips = plan.Clips;
         var joins = plan.JoinsBetweenClips;
 
@@ -43,18 +43,18 @@ public sealed class AbridgedTimelineLayout
             var incomingXf = i > 0
                 && i - 1 < joins.Count
                 && joins[i - 1].Mode == TransitionMode.Crossfade
-                && joins[i - 1].CrossfadeSeconds > 0
-                    ? joins[i - 1].CrossfadeSeconds
-                    : 0;
+                && joins[i - 1].Crossfade > TimeSpan.Zero
+                    ? joins[i - 1].Crossfade
+                    : TimeSpan.Zero;
             var outgoingXf = i < joins.Count
                 && joins[i].Mode == TransitionMode.Crossfade
-                && joins[i].CrossfadeSeconds > 0
-                    ? joins[i].CrossfadeSeconds
-                    : 0;
+                && joins[i].Crossfade > TimeSpan.Zero
+                    ? joins[i].Crossfade
+                    : TimeSpan.Zero;
 
-            var solo = clip.Duration.TotalSeconds - incomingXf - outgoingXf;
-            if (solo < 0)
-                solo = 0;
+            var solo = clip.Duration - incomingXf - outgoingXf;
+            if (solo < TimeSpan.Zero)
+                solo = TimeSpan.Zero;
 
             outPos += solo;
 
@@ -63,47 +63,44 @@ public sealed class AbridgedTimelineLayout
 
             var runId = joinDeletedRunIds is not null && i < joinDeletedRunIds.Count
                 ? joinDeletedRunIds[i]
-                : Guid.Empty;
+                : default;
 
             var join = joins[i];
-            if (join.Mode == TransitionMode.Crossfade && join.CrossfadeSeconds > 0)
+            if (join.Mode == TransitionMode.Crossfade && join.Crossfade > TimeSpan.Zero)
             {
-                var xf = join.CrossfadeSeconds;
+                var xf = join.Crossfade;
                 overlays.Add(new InteriorOverlay(
                     TransitionMode.Crossfade,
-                    new TimeRange(TimeSpan.FromSeconds(outPos), TimeSpan.FromSeconds(outPos + xf)),
+                    new TimeRange(outPos, outPos + xf),
                     runId));
                 outPos += xf;
             }
             else
             {
-                var at = TimeSpan.FromSeconds(outPos);
                 overlays.Add(new InteriorOverlay(
                     TransitionMode.HardCut,
-                    new TimeRange(at, at),
+                    new TimeRange(outPos, outPos),
                     runId));
             }
         }
 
-        var duration = TimeSpan.FromSeconds(outPos);
+        var duration = outPos;
         var list = overlays.ToImmutable();
 
         if (plan.FadeFromBlackSeconds is > 0 && duration > TimeSpan.Zero)
         {
-            var fade = Math.Min(plan.FadeFromBlackSeconds.Value, duration.TotalSeconds);
+            var fade = TimeSpans.Min(TimeSpan.FromSeconds(plan.FadeFromBlackSeconds.Value), duration);
             list = list.Insert(0, new ExteriorOverlay(
                 ExteriorOverlayKind.FadeIn,
-                new TimeRange(TimeSpan.Zero, TimeSpan.FromSeconds(fade))));
+                new TimeRange(TimeSpan.Zero, fade)));
         }
 
         if (plan.FadeToBlackSeconds is > 0 && duration > TimeSpan.Zero)
         {
-            var fade = Math.Min(plan.FadeToBlackSeconds.Value, duration.TotalSeconds);
+            var fade = TimeSpans.Min(TimeSpan.FromSeconds(plan.FadeToBlackSeconds.Value), duration);
             list = list.Add(new ExteriorOverlay(
                 ExteriorOverlayKind.FadeOut,
-                new TimeRange(
-                    TimeSpan.FromSeconds(Math.Max(0, duration.TotalSeconds - fade)),
-                    duration)));
+                new TimeRange(duration - fade, duration)));
         }
 
         return new AbridgedTimelineLayout(duration, list);
@@ -115,7 +112,7 @@ public sealed class AbridgedTimelineLayout
         return timeline.TryBuildExportPlan().Match(
             plan =>
             {
-                ImmutableList<Guid> runIds =
+                ImmutableList<DeletedRunId> runIds =
                 [
                     .. timeline.GetDeletedRuns().Where(r => r.IsInterior).Select(r => r.Id)
                 ];

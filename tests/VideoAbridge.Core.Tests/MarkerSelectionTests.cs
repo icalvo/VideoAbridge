@@ -4,12 +4,12 @@ namespace VideoAbridge.Core.Tests;
 
 public class MarkerSelectionTests
 {
-    private static readonly Guid A = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
-    private static readonly Guid B = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
-    private static readonly Guid C = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
-    private static readonly Guid D = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
+    private static readonly MarkerId A = MarkerId.From(Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"));
+    private static readonly MarkerId B = MarkerId.From(Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"));
+    private static readonly MarkerId C = MarkerId.From(Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc"));
+    private static readonly MarkerId D = MarkerId.From(Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd"));
 
-    private static readonly IReadOnlyDictionary<Guid, TimeSpan> Times = new Dictionary<Guid, TimeSpan>
+    private static readonly IReadOnlyDictionary<MarkerId, TimeSpan> Times = new Dictionary<MarkerId, TimeSpan>
     {
         [A] = TimeSpan.FromSeconds(10),
         [B] = TimeSpan.FromSeconds(20),

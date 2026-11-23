@@ -3,12 +3,19 @@ using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 
 const int Size = 512;
-var outPng = args.Length > 0
-    ? args[0]
-    : Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "VideoAbridge", "Assets", "VideoAbridge.png"));
+if (args.Length < 1 || string.IsNullOrWhiteSpace(args[0]))
+{
+    Console.Error.WriteLine("Usage: IconGen <output.png>");
+    Console.Error.WriteLine("Writes <output.png> and a same-named .ico beside it.");
+    return 1;
+}
+
+var outPng = Path.GetFullPath(args[0]);
 var outIco = Path.ChangeExtension(outPng, ".ico");
 
-Directory.CreateDirectory(Path.GetDirectoryName(outPng)!);
+var outDir = Path.GetDirectoryName(outPng);
+if (outDir is not null)
+    Directory.CreateDirectory(outDir);
 
 using var bmp = new Bitmap(Size, Size, PixelFormat.Format32bppArgb);
 using (var g = Graphics.FromImage(bmp))

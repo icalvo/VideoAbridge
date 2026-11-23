@@ -14,7 +14,7 @@ public class ProjectDocumentTests
         timeline = timeline.AddMarker(TimeSpan.FromSeconds(30), MarkerSource.User).RequireOk();
         timeline = timeline.DeleteBetween(timeline.Markers[0].Id, timeline.Markers[1].Id).RequireOk();
         var del = timeline.GetDeletedRuns().Single(r => r.IsInterior);
-        timeline = timeline.SetJoinCrossfade(del.Id, 1.0).RequireOk();
+        timeline = timeline.SetJoinCrossfade(del.Id, TimeSpan.FromSeconds(1.0)).RequireOk();
         timeline = timeline.SetEndFade(2.0).RequireOk();
 
         var doc = ProjectDocument.FromTimeline(@"C:\video.mp4", timeline);

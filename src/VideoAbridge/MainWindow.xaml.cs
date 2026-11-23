@@ -86,10 +86,19 @@ public partial class MainWindow : Window, IDisposable
                 _viewModel.SeekPlayhead(e.Time);
         };
         Timeline.MarkerClicked += (_, e) =>
+        {
+            if (e.Id is not MarkerId markerId)
+                return;
             _viewModel.ToggleMarkerSelection(
-                e.Id,
+                markerId,
                 extendSelection: (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift);
-        Timeline.DeletedRunSelected += (_, e) => _viewModel.SelectDeletedRunCommand.Execute(e.Id);
+        };
+        Timeline.DeletedRunSelected += (_, e) =>
+        {
+            if (e.Id is not DeletedRunId runId)
+                return;
+            _viewModel.SelectDeletedRunCommand.Execute(runId);
+        };
         Timeline.FadeInClicked += (_, _) => FocusFadeTextBox(StartFadeTextBox);
         Timeline.FadeOutClicked += (_, _) => FocusFadeTextBox(EndFadeTextBox);
         Timeline.TimelineViewChanged += (_, _) =>
@@ -310,7 +319,7 @@ public partial class MainWindow : Window, IDisposable
         }
 
         _versionTabDragMoved = true;
-        var data = new DataObject(typeof(Guid), tab.Id);
+        var data = new DataObject(typeof(VersionId), tab.Id);
         DragDrop.DoDragDrop(element, data, DragDropEffects.Move);
         ClearVersionTabDrag();
     }
@@ -454,7 +463,7 @@ public partial class MainWindow : Window, IDisposable
             DispatcherPriority.Input);
     }
 
-    private int IndexOfVersionTab(Guid id)
+    private int IndexOfVersionTab(VersionId id)
     {
         for (var i = 0; i < _viewModel.VersionTabs.Count; i++)
         {
@@ -465,12 +474,12 @@ public partial class MainWindow : Window, IDisposable
         return -1;
     }
 
-    private static bool TryGetVersionDragId(DragEventArgs e, out Guid id)
+    private static bool TryGetVersionDragId(DragEventArgs e, out VersionId id)
     {
         ArgumentNullException.ThrowIfNull(e);
-        if (e.Data.GetDataPresent(typeof(Guid)) && e.Data.GetData(typeof(Guid)) is Guid guid)
+        if (e.Data.GetDataPresent(typeof(VersionId)) && e.Data.GetData(typeof(VersionId)) is VersionId versionId)
         {
-            id = guid;
+            id = versionId;
             return true;
         }
 
@@ -566,6 +575,8 @@ public partial class MainWindow : Window, IDisposable
                 TryExecute(_viewModel.DeleteSectionToEndCommand),
             ModifierKeys.Control when e.Key is Key.N =>
                 TryExecute(_viewModel.CreateVersionCommand),
+            ModifierKeys.Control when e.Key is Key.M =>
+                TryExecute(_viewModel.MoveMarkerToPlayheadCommand),
             ModifierKeys.Control when e.Key is Key.Z =>
                 TryExecute(_viewModel.UndoCommand),
             ModifierKeys.Control when e.Key is Key.Y =>
@@ -675,6 +686,50 @@ public partial class MainWindow : Window, IDisposable
     }
 
     private void KeyboardShortcuts_Click(object sender, RoutedEventArgs e) => ShowKeyboardShortcuts();
+
+    private void HelpMenu_SubmenuOpened(object sender, RoutedEventArgs e) => RefreshExplorerContextMenuItem();
+
+    private void ExplorerContextMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (ExplorerContextMenu.IsInstalled())
+        {
+            var error = ExplorerContextMenu.Uninstall();
+            if (error is not null)
+            {
+                MessageBox.Show(error, "VideoAbridge", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+        }
+        else
+        {
+            var exePath = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(exePath))
+            {
+                MessageBox.Show(
+                    "Could not determine the VideoAbridge executable path.",
+                    "VideoAbridge",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            var error = ExplorerContextMenu.InstallForCurrentUser(exePath);
+            if (error is not null)
+            {
+                MessageBox.Show(error, "VideoAbridge", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+        }
+
+        RefreshExplorerContextMenuItem();
+    }
+
+    private void RefreshExplorerContextMenuItem()
+    {
+        ExplorerContextMenuItem.Header = ExplorerContextMenu.IsInstalled()
+            ? "_Remove File Explorer context menu"
+            : "_Add File Explorer context menu";
+    }
 
     private bool ShowKeyboardShortcuts()
     {

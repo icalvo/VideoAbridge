@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 
 namespace VideoAbridge.ViewModels;
 
@@ -27,12 +28,12 @@ internal sealed class EditHistory
         _redo.Clear();
     }
 
-    public bool TryUndo(Timeline current, out Timeline previous)
+    public bool TryUndo(Timeline current, [NotNullWhen(true)] out Timeline? previous)
     {
         ArgumentNullException.ThrowIfNull(current);
         if (_undo.Count == 0)
         {
-            previous = null!;
+            previous = null;
             return false;
         }
 
@@ -44,12 +45,12 @@ internal sealed class EditHistory
         return true;
     }
 
-    public bool TryRedo(Timeline current, out Timeline next)
+    public bool TryRedo(Timeline current, [NotNullWhen(true)] out Timeline? next)
     {
         ArgumentNullException.ThrowIfNull(current);
         if (_redo.Count == 0)
         {
-            next = null!;
+            next = null;
             return false;
         }
 

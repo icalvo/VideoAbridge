@@ -49,7 +49,9 @@ public sealed class ThumbnailExtractor
         if (File.Exists(output))
             return output;
 
-        Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+        var cacheDir = Path.GetDirectoryName(output);
+        if (cacheDir is not null)
+            Directory.CreateDirectory(cacheDir);
 
         var ss = seek.TotalSeconds.ToString("0.000", CultureInfo.InvariantCulture);
         var result = await ProcessRunner.RunAsync(

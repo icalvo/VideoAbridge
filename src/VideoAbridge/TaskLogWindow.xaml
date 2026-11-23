@@ -23,11 +23,7 @@
                  FontFamily="Consolas"
                  FontSize="12"
                  Background="#252526"
-                 Foreground="#D4D4D4"
-                 BorderBrush="#3F3F46"
-                 BorderThickness="1"
                  Padding="8"
-                 CaretBrush="#D4D4D4"
                  TextChanged="LogBox_TextChanged"/>
     </Grid>
 </Window>

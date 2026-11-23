@@ -27,7 +27,8 @@ internal static class HeroEditSeeder
         cache.SaveVersionSet(videoPath, set);
     }
 
-    private static T RequireOk<T>(Result<T> result) =>
+    private static T RequireOk<T>(Result<T> result)
+        where T : notnull =>
         result.Match(
             value => value,
             error => throw new InvalidOperationException($"{error.Code}: {error.Message}"));

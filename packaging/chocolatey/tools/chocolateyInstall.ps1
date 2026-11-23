@@ -34,3 +34,23 @@ Install-ChocolateyShortcut `
   -TargetPath $exe `
   -WorkingDirectory $toolsDir `
   -Description 'VideoAbridge'
+
+$pp = Get-PackageParameters
+$skipContextMenu = $pp.ContainsKey('NoExplorerContextMenu')
+if (-not $skipContextMenu) {
+  $extensions = @('.mp4', '.mkv', '.mov', '.avi', '.wmv', '.webm')
+  $command = "`"$exe`" `"%1`""
+  foreach ($ext in $extensions) {
+    $verbKey = "HKLM:\Software\Classes\SystemFileAssociations\$ext\shell\VideoAbridge"
+    $cmdKey = "$verbKey\command"
+    New-Item -Path $verbKey -Force | Out-Null
+    New-Item -Path $cmdKey -Force | Out-Null
+    Set-ItemProperty -Path $verbKey -Name '(Default)' -Value 'Abridge...'
+    Set-ItemProperty -Path $verbKey -Name 'Icon' -Value $exe
+    Set-ItemProperty -Path $cmdKey -Name '(Default)' -Value $command
+  }
+  Write-Host "Registered File Explorer 'Abridge...' context menu for video files."
+}
+else {
+  Write-Host "Skipped File Explorer context menu (/NoExplorerContextMenu)."
+}

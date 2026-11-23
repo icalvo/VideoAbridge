@@ -6,139 +6,117 @@ namespace VideoAbridge.Core.Editing;
 /// </summary>
 public static class TimelineFocusNavigation
 {
-    public static TimelineFocusTarget MoveHorizontal(
-        TimelineFocusTarget current,
+    public static TimelineItemId? MoveHorizontal(
+        TimelineItemId? current,
         int direction,
-        IReadOnlyList<(Guid Id, TimeSpan Time)> markers,
-        IReadOnlyList<(Guid Id, TimeSpan Time)> deletedRuns)
+        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> markers,
+        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> deletedRuns)
     {
         ArgumentNullException.ThrowIfNull(markers);
         ArgumentNullException.ThrowIfNull(deletedRuns);
         if (direction == 0)
             return current;
 
-        var lane = current.Kind switch
+        if (current is not { } focus)
+            return PickDefault(markers, deletedRuns);
+
+        var lane = focus switch
         {
-            TimelineFocusKind.Marker => markers,
-            TimelineFocusKind.DeletedRun => deletedRuns,
-            _ => null,
+            MarkerId => markers,
+            DeletedRunId => deletedRuns,
         };
 
-        if (lane is null || lane.Count == 0)
-            return current.IsNone ? PickDefault(markers, deletedRuns) : current;
+        if (lane.Count == 0)
+            return focus;
 
-        var index = IndexOf(lane, current.Id);
+        var index = IndexOf(lane, focus);
         if (index < 0)
-            return NearestInLane(lane, TimeSpan.Zero) is { } fallback
-                ? new TimelineFocusTarget(current.Kind, fallback)
-                : TimelineFocusTarget.None;
+            return NearestInLane(lane, TimeSpan.Zero);
 
         var next = Math.Clamp(index + Math.Sign(direction), 0, lane.Count - 1);
-        return new TimelineFocusTarget(current.Kind, lane[next].Id);
+        return lane[next].Id;
     }
 
-    public static TimelineFocusTarget MoveVertical(
-        TimelineFocusTarget current,
-        IReadOnlyList<(Guid Id, TimeSpan Time)> markers,
-        IReadOnlyList<(Guid Id, TimeSpan Time)> deletedRuns)
+    public static TimelineItemId? MoveVertical(
+        TimelineItemId? current,
+        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> markers,
+        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> deletedRuns)
     {
         ArgumentNullException.ThrowIfNull(markers);
         ArgumentNullException.ThrowIfNull(deletedRuns);
 
-        if (current.Kind == TimelineFocusKind.Marker)
-        {
-            if (deletedRuns.Count == 0)
-                return current;
-            var time = TimeOf(markers, current.Id) ?? TimeSpan.Zero;
-            var id = NearestInLane(deletedRuns, time);
-            return id is null
-                ? current
-                : new TimelineFocusTarget(TimelineFocusKind.DeletedRun, id.Value);
-        }
+        if (current is not { } focus)
+            return PickDefault(markers, deletedRuns);
 
-        if (current.Kind == TimelineFocusKind.DeletedRun)
+        return focus switch
         {
-            if (markers.Count == 0)
-                return current;
-            var time = TimeOf(deletedRuns, current.Id) ?? TimeSpan.Zero;
-            var id = NearestInLane(markers, time);
-            return id is null
-                ? current
-                : new TimelineFocusTarget(TimelineFocusKind.Marker, id.Value);
-        }
-
-        return PickDefault(markers, deletedRuns);
+            MarkerId => deletedRuns.Count == 0
+                ? focus
+                : NearestInLane(deletedRuns, TimeOf(markers, focus) ?? TimeSpan.Zero) ?? focus,
+            DeletedRunId => markers.Count == 0
+                ? focus
+                : NearestInLane(markers, TimeOf(deletedRuns, focus) ?? TimeSpan.Zero) ?? focus,
+        };
     }
 
-    /// <summary>Nearest marker to <paramref name="time"/>, else nearest deleted run, else none.</summary>
-    public static TimelineFocusTarget NearestToTime(
+    /// <summary>Nearest marker to <paramref name="time"/>, else nearest deleted run, else null.</summary>
+    public static TimelineItemId? NearestToTime(
         TimeSpan time,
-        IReadOnlyList<(Guid Id, TimeSpan Time)> markers,
-        IReadOnlyList<(Guid Id, TimeSpan Time)> deletedRuns)
+        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> markers,
+        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> deletedRuns)
     {
         ArgumentNullException.ThrowIfNull(markers);
         ArgumentNullException.ThrowIfNull(deletedRuns);
 
-        if (NearestInLane(markers, time) is { } markerId)
-            return new TimelineFocusTarget(TimelineFocusKind.Marker, markerId);
-        if (NearestInLane(deletedRuns, time) is { } runId)
-            return new TimelineFocusTarget(TimelineFocusKind.DeletedRun, runId);
-        return TimelineFocusTarget.None;
+        return NearestInLane(markers, time) ?? NearestInLane(deletedRuns, time);
     }
 
     /// <summary>
     /// After the focused item disappears: nearest remaining in the same lane,
-    /// else the other lane, else none.
+    /// else the other lane, else null.
     /// </summary>
-    public static TimelineFocusTarget AfterRemoval(
-        TimelineFocusTarget removed,
+    public static TimelineItemId? AfterRemoval(
+        TimelineItemId removed,
         TimeSpan removedTime,
-        IReadOnlyList<(Guid Id, TimeSpan Time)> markers,
-        IReadOnlyList<(Guid Id, TimeSpan Time)> deletedRuns)
+        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> markers,
+        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> deletedRuns)
     {
         ArgumentNullException.ThrowIfNull(markers);
         ArgumentNullException.ThrowIfNull(deletedRuns);
 
-        var sameLane = removed.Kind == TimelineFocusKind.Marker ? markers : deletedRuns;
-        var otherLane = removed.Kind == TimelineFocusKind.Marker ? deletedRuns : markers;
-        var sameKind = removed.Kind == TimelineFocusKind.Marker
-            ? TimelineFocusKind.Marker
-            : TimelineFocusKind.DeletedRun;
-        var otherKind = removed.Kind == TimelineFocusKind.Marker
-            ? TimelineFocusKind.DeletedRun
-            : TimelineFocusKind.Marker;
+        var (sameLane, otherLane) = removed switch
+        {
+            MarkerId => (markers, deletedRuns),
+            DeletedRunId => (deletedRuns, markers),
+        };
 
-        if (NearestInLane(sameLane, removedTime) is { } sameId)
-            return new TimelineFocusTarget(sameKind, sameId);
-        if (NearestInLane(otherLane, removedTime) is { } otherId)
-            return new TimelineFocusTarget(otherKind, otherId);
-        return TimelineFocusTarget.None;
+        return NearestInLane(sameLane, removedTime) ?? NearestInLane(otherLane, removedTime);
     }
 
-    public static TimelineFocusTarget PickDefault(
-        IReadOnlyList<(Guid Id, TimeSpan Time)> markers,
-        IReadOnlyList<(Guid Id, TimeSpan Time)> deletedRuns)
+    public static TimelineItemId? PickDefault(
+        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> markers,
+        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> deletedRuns)
     {
         ArgumentNullException.ThrowIfNull(markers);
         ArgumentNullException.ThrowIfNull(deletedRuns);
 
         if (markers.Count > 0)
-            return new TimelineFocusTarget(TimelineFocusKind.Marker, markers[0].Id);
+            return markers[0].Id;
         if (deletedRuns.Count > 0)
-            return new TimelineFocusTarget(TimelineFocusKind.DeletedRun, deletedRuns[0].Id);
-        return TimelineFocusTarget.None;
+            return deletedRuns[0].Id;
+        return null;
     }
 
     /// <summary>Nearest id by absolute time distance; ties prefer the earlier item.</summary>
-    public static Guid? NearestInLane(
-        IReadOnlyList<(Guid Id, TimeSpan Time)> lane,
+    public static TimelineItemId? NearestInLane(
+        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> lane,
         TimeSpan time)
     {
         ArgumentNullException.ThrowIfNull(lane);
         if (lane.Count == 0)
             return null;
 
-        Guid? bestId = null;
+        TimelineItemId? bestId = null;
         var bestDist = TimeSpan.MaxValue;
         var bestTime = TimeSpan.MaxValue;
 
@@ -156,7 +134,7 @@ public static class TimelineFocusNavigation
         return bestId;
     }
 
-    private static int IndexOf(IReadOnlyList<(Guid Id, TimeSpan Time)> lane, Guid id)
+    private static int IndexOf(IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> lane, TimelineItemId id)
     {
         for (var i = 0; i < lane.Count; i++)
         {
@@ -167,7 +145,7 @@ public static class TimelineFocusNavigation
         return -1;
     }
 
-    private static TimeSpan? TimeOf(IReadOnlyList<(Guid Id, TimeSpan Time)> lane, Guid id)
+    private static TimeSpan? TimeOf(IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> lane, TimelineItemId id)
     {
         foreach (var (itemId, time) in lane)
         {
