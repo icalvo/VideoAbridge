@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Timeline waveform is cached under LocalAppData so reopening the same video skips FFmpeg peak extraction.
+- Timeline waveform normalizes to the 99th-percentile peak (isolated spikes clamp) so quiet material stays visible.
 - Keep-segment duration labels under the edit timeline cover start→first marker and last marker→end (as well as between markers), and hide when the gap is too narrow to fit the text.
 - Timeline horizontal scrollbar overlays the timeline (no viewport shrink / zoom jump when it appears). Scrollbars and text boxes use dark styling to match the app.
 

@@ -1025,7 +1025,7 @@ public partial class TimelineControl : UserControl
             return;
 
         var midY = trackTop + trackHeight / 2;
-        // Peak-normalized samples are ±1; 0.4 from center → 80% of bar height peak-to-peak.
+        // Samples are scaled to ±1 (percentile peak + clamp); 0.4 from center → 80% bar height.
         var amp = trackHeight * 0.4;
         var step = trackWidth / columns.Length;
 

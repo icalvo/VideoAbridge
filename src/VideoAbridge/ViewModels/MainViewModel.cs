@@ -27,6 +27,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly ThumbnailExtractor _thumbnails = new();
     private readonly VideoExporter _exporter = new();
     private readonly AudioPeakExtractor _audioPeaks = new();
+    private readonly AudioPeakCacheService _audioPeakCache = CreateAudioPeakCache();
     private readonly MarkerCacheService _markerCache = CreateMarkerCache();
     private readonly RecentFilesService _recentFiles = CreateRecentFiles();
     private readonly EditHistory _editHistory = new();
@@ -481,6 +482,14 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         return string.IsNullOrWhiteSpace(dir)
             ? new MarkerCacheService()
             : new MarkerCacheService(dir);
+    }
+
+    private static AudioPeakCacheService CreateAudioPeakCache()
+    {
+        var dir = Environment.GetEnvironmentVariable("VIDEOABRIDGE_WAVEFORM_CACHE");
+        return string.IsNullOrWhiteSpace(dir)
+            ? new AudioPeakCacheService()
+            : new AudioPeakCacheService(dir);
     }
 
     private static RecentFilesService CreateRecentFiles()
@@ -2632,6 +2641,23 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         AudioPeakEnvelope = null;
         var cts = new CancellationTokenSource();
         _audioPeaksCts = cts;
+
+        var cached = _audioPeakCache.TryLoad(
+            path,
+            duration,
+            AudioPeakExtractor.DefaultBucketDuration,
+            AudioPeakExtractor.SampleRate);
+        if (cached is { IsEmpty: false }
+            && !cts.IsCancellationRequested
+            && ReferenceEquals(_audioPeaksCts, cts))
+        {
+            AudioPeakEnvelope = cached;
+            cts.Dispose();
+            if (ReferenceEquals(_audioPeaksCts, cts))
+                _audioPeaksCts = null;
+            return;
+        }
+
         var task = CreateTask($"Waveform: {Path.GetFileName(path)}");
         task.CanCancel = true;
         task.CancelCommand = new RelayCommand(CancelAudioPeaks);
@@ -2652,7 +2678,16 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            AudioPeakEnvelope = envelope.IsEmpty ? null : envelope;
+            if (envelope.IsEmpty)
+            {
+                AudioPeakEnvelope = null;
+            }
+            else
+            {
+                AudioPeakEnvelope = envelope;
+                _audioPeakCache.Save(path, duration, envelope, AudioPeakExtractor.SampleRate);
+            }
+
             RemoveTask(task);
         }
         catch (OperationCanceledException)
