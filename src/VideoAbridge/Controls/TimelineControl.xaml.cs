@@ -1281,7 +1281,7 @@ public partial class TimelineControl : UserControl
         var min = MinPixelsPerSecond;
         var max = Math.Max(MaxPixelsPerSecond, min);
         var oldPps = Math.Max(min, PixelsPerSecond);
-        var factor = e.Delta > 0 ? 1.1 : 1 / 1.1;
+        var factor = e.Delta > 0 ? 1.05 : 1 / 1.05;
         var newPps = Math.Clamp(oldPps * factor, min, max);
         if (Math.Abs(newPps - oldPps) < 1e-9)
         {
