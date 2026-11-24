@@ -98,6 +98,9 @@ public partial class TimelineControl : UserControl
     private bool _updatingZoom;
     private double _lastViewportWidth;
     private HashSet<MarkerId> _selectedMarkerSet = [];
+    /// <summary>Surrounding boundaries for the 0-selection section focus triangle; null when inactive.</summary>
+    private MarkerId? _sectionFocusLeft;
+    private MarkerId? _sectionFocusRight;
     private readonly DispatcherTimer _thumbRedrawTimer = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private readonly List<(AbridgedOverlay Overlay, double Left, double Right)> _previewHitRegions = [];
 
@@ -110,7 +113,17 @@ public partial class TimelineControl : UserControl
             Redraw();
         };
         SizeChanged += OnControlSizeChanged;
-        Scroller.ScrollChanged += (_, _) => TimelineViewChanged?.Invoke(this, EventArgs.Empty);
+        Scroller.ScrollChanged += (_, e) =>
+        {
+            // Viewport-clamped labels / section focus must track horizontal scroll.
+            if (e.HorizontalChange != 0)
+            {
+                _thumbRedrawTimer.Stop();
+                _thumbRedrawTimer.Start();
+            }
+
+            TimelineViewChanged?.Invoke(this, EventArgs.Empty);
+        };
         IsKeyboardFocusWithinChanged += (_, _) =>
             IsTimelineKeyboardFocused = IsKeyboardFocusWithin;
         Loaded += (_, _) =>
@@ -139,35 +152,23 @@ public partial class TimelineControl : UserControl
     }
 
     /// <summary>
-    /// Scroll horizontally just enough so the focus triangle is in the viewport when scroll room allows.
-    /// At the true timeline start/end the triangle may clip; no extra canvas pad is added.
+    /// Scroll horizontally just enough so the playhead is in the viewport when scroll room allows.
+    /// At the true timeline start/end the playhead may clip; no extra canvas pad is added.
     /// </summary>
-    public void EnsureFocusedItemVisible()
+    public void EnsurePlayheadVisible()
     {
-        if (IsPreviewMode || Timeline is null || FocusedTimelineItemId is not { } focus)
+        if (DisplayDuration <= TimeSpan.Zero)
             return;
 
         var pps = Math.Max(MinPixelsPerSecond, PixelsPerSecond);
-        double? centerX = focus switch
-        {
-            MarkerId markerId => Timeline.Markers.FirstOrDefault(m => m.Id == markerId) is { } marker
-                ? marker.Time.TotalSeconds * pps
-                : null,
-            DeletedRunId runId => Timeline.GetDeletedRuns().FirstOrDefault(r => r.Id == runId) is { } run
-                ? (run.Range.Start.TotalSeconds + run.Range.End.TotalSeconds) / 2.0 * pps
-                : null,
-        };
-
-        if (centerX is not { } x)
-            return;
-
+        var x = Playhead.TotalSeconds * pps;
         var viewport = GetViewportWidth();
         if (viewport <= 1)
             return;
 
         var canvasWidth = RootCanvas.Width > 1
             ? RootCanvas.Width
-            : Timeline.Duration.TotalSeconds * pps;
+            : DisplayDuration.TotalSeconds * pps;
         var maxOffset = Math.Max(0, canvasWidth - viewport);
         var left = Scroller.HorizontalOffset;
         var right = left + viewport;
@@ -288,19 +289,15 @@ public partial class TimelineControl : UserControl
     private static void OnVisualPropertyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) =>
         ((TimelineControl)d).Redraw();
 
-    private static void OnFocusItemChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-    {
-        var control = (TimelineControl)d;
-        control.Redraw();
-        control.EnsureFocusedItemVisible();
-    }
+    private static void OnFocusItemChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) =>
+        ((TimelineControl)d).Redraw();
 
     private static void OnPreviewModeChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         var control = (TimelineControl)d;
         // Keep the caller's zoom when switching Edit/Preview; only refresh min/max for the new duration.
         control.UpdateZoomBounds(forceFit: false);
-        control.Redraw();
+        control.SyncSectionFocusBounds(forceRedraw: true);
     }
 
     private static void OnAbridgedLayoutChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
@@ -326,7 +323,7 @@ public partial class TimelineControl : UserControl
         var newDuration = (e.NewValue as Timeline)?.Duration ?? TimeSpan.Zero;
         var forceFit = newDuration != control._fittedDuration;
         control.UpdateZoomBounds(forceFit);
-        control.Redraw();
+        control.SyncSectionFocusBounds(forceRedraw: true);
     }
 
     private static void OnPixelsPerSecondChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
@@ -355,7 +352,7 @@ public partial class TimelineControl : UserControl
         if (e.NewValue is INotifyCollectionChanged newNc)
             newNc.CollectionChanged += control.OnSelectedMarkerIdsCollectionChanged;
         control.RefreshSelectedMarkerSet();
-        control.Redraw();
+        control.SyncSectionFocusBounds(forceRedraw: true);
     }
 
     private void OnThumbCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -368,7 +365,7 @@ public partial class TimelineControl : UserControl
     private void OnSelectedMarkerIdsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         RefreshSelectedMarkerSet();
-        Redraw();
+        SyncSectionFocusBounds(forceRedraw: true);
     }
 
     private void RefreshSelectedMarkerSet()
@@ -376,8 +373,37 @@ public partial class TimelineControl : UserControl
         _selectedMarkerSet = SelectedMarkerIds?.OfType<MarkerId>().ToHashSet() ?? [];
     }
 
-    private static void OnPlayheadChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) =>
-        ((TimelineControl)d).UpdatePlayhead();
+    /// <summary>
+    /// When no markers are selected, track the playhead's surrounding boundaries so the
+    /// section focus triangle redraws when the span changes.
+    /// </summary>
+    private void SyncSectionFocusBounds(bool forceRedraw = false)
+    {
+        MarkerId? left = null;
+        MarkerId? right = null;
+        if (!IsPreviewMode
+            && Timeline is { } timeline
+            && _selectedMarkerSet.Count == 0
+            && timeline.TryGetSurroundingBoundaries(Playhead, out var l, out var r))
+        {
+            left = l;
+            right = r;
+        }
+
+        if (!forceRedraw && left == _sectionFocusLeft && right == _sectionFocusRight)
+            return;
+
+        _sectionFocusLeft = left;
+        _sectionFocusRight = right;
+        Redraw();
+    }
+
+    private static void OnPlayheadChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        var control = (TimelineControl)d;
+        control.UpdatePlayhead();
+        control.SyncSectionFocusBounds();
+    }
 
     private void OnControlSizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -499,11 +525,9 @@ public partial class TimelineControl : UserControl
         Scroller.ScrollToHorizontalOffset(0);
     }
 
-    /// <summary>
-    /// Zoom in/out around the focused marker or cut (red triangle); falls back to the playhead.
-    /// </summary>
+    /// <summary>Zoom in/out around the playhead.</summary>
     /// <param name="zoomIn">True to zoom in (~1.1×), false to zoom out.</param>
-    public void ZoomAroundFocus(bool zoomIn)
+    public void ZoomAroundPlayhead(bool zoomIn)
     {
         var min = MinPixelsPerSecond;
         var max = Math.Max(MaxPixelsPerSecond, min);
@@ -513,7 +537,7 @@ public partial class TimelineControl : UserControl
         if (Math.Abs(newPps - oldPps) < 1e-9)
             return;
 
-        var centerSeconds = TryGetFocusCenterSeconds() ?? Playhead.TotalSeconds;
+        var centerSeconds = Playhead.TotalSeconds;
         var viewport = GetViewportWidth();
         var viewportCenterX = viewport > 1 ? viewport / 2 : 0;
 
@@ -522,22 +546,6 @@ public partial class TimelineControl : UserControl
         var newX = centerSeconds * newPps;
         Scroller.ScrollToHorizontalOffset(Math.Max(0, newX - viewportCenterX));
         TimelineViewChanged?.Invoke(this, EventArgs.Empty);
-    }
-
-    private double? TryGetFocusCenterSeconds()
-    {
-        if (IsPreviewMode || Timeline is null || FocusedTimelineItemId is not { } focus)
-            return null;
-
-        return focus switch
-        {
-            MarkerId markerId => Timeline.Markers.FirstOrDefault(m => m.Id == markerId) is { } marker
-                ? marker.Time.TotalSeconds
-                : null,
-            DeletedRunId runId => Timeline.GetDeletedRuns().FirstOrDefault(r => r.Id == runId) is { } run
-                ? (run.Range.Start.TotalSeconds + run.Range.End.TotalSeconds) / 2.0
-                : null,
-        };
     }
 
     /// <summary>
@@ -694,17 +702,23 @@ public partial class TimelineControl : UserControl
             if (overlay.Value is not InteriorOverlay joinOverlay)
                 continue;
 
-            var (left, right) = OverlayPixelBounds(overlay, pps, trackWidth);
+            var trueLeft = overlay.Range.Start.TotalSeconds * pps;
+            var trueRight = overlay.Range.End.TotalSeconds * pps;
+            if (!TryGetVisibleSpanCenterX(trueLeft, trueRight, out var mid))
+                continue;
+
+            var labelText = joinOverlay.Mode == TransitionMode.Crossfade
+                ? $"XF {joinOverlay.Range.Duration.TotalSeconds:0.##}s"
+                : "Cut";
+            var labelWidth = Math.Max(12, labelText.Length * 3.2);
             var label = new TextBlock
             {
-                Text = joinOverlay.Mode == TransitionMode.Crossfade
-                    ? $"XF {joinOverlay.Range.Duration.TotalSeconds:0.##}s"
-                    : "Cut",
+                Text = labelText,
                 Foreground = Brushes.White,
                 FontSize = 10,
                 IsHitTestVisible = false
             };
-            Canvas.SetLeft(label, (left + right) / 2 - 12);
+            Canvas.SetLeft(label, mid - labelWidth / 2);
             Canvas.SetTop(label, trackTop + trackHeight + 4);
             RootCanvas.Children.Add(label);
         }
@@ -790,31 +804,29 @@ public partial class TimelineControl : UserControl
         {
             var left = run.Range.Start.TotalSeconds * pps;
             var right = run.Range.End.TotalSeconds * pps;
-            var mid = (left + right) / 2;
             var labelText = DeletedRunLabel(run, timeline.Duration);
-            var label = new TextBlock
+            var labelWidth = Math.Max(12, labelText.Length * 3.2);
+            if (TryGetVisibleSpanCenterX(left, right, out var mid)
+                && VisibleSpanWidth(left, right) >= labelWidth)
             {
-                Text = labelText,
-                Foreground = Brushes.White,
-                FontSize = 10,
-                Cursor = Cursors.Hand,
-                Tag = run.Id
-            };
-            // Approximate center using typical label width for short captions.
-            Canvas.SetLeft(label, mid - Math.Max(12, labelText.Length * 3.2));
-            Canvas.SetTop(label, trackTop + trackHeight + 4);
-            label.MouseLeftButtonDown += (_, e) =>
-            {
-                Focus();
-                DeletedRunSelected?.Invoke(this, new TimelineItemIdEventArgs(run.Id));
-                SelectedDeletedRunId = run.Id;
-                e.Handled = true;
-            };
-            RootCanvas.Children.Add(label);
-
-            if (FocusedTimelineItemId == run.Id)
-            {
-                AddFocusTriangle(mid, trackTop + trackHeight + 18);
+                var label = new TextBlock
+                {
+                    Text = labelText,
+                    Foreground = Brushes.White,
+                    FontSize = 10,
+                    Cursor = Cursors.Hand,
+                    Tag = run.Id
+                };
+                Canvas.SetLeft(label, mid - labelWidth / 2);
+                Canvas.SetTop(label, trackTop + trackHeight + 4);
+                label.MouseLeftButtonDown += (_, e) =>
+                {
+                    Focus();
+                    DeletedRunSelected?.Invoke(this, new TimelineItemIdEventArgs(run.Id));
+                    SelectedDeletedRunId = run.Id;
+                    e.Handled = true;
+                };
+                RootCanvas.Children.Add(label);
             }
 
             if (SelectedDeletedRunId == run.Id)
@@ -901,11 +913,9 @@ public partial class TimelineControl : UserControl
             };
             RootCanvas.Children.Add(handle);
 
-            if (FocusedTimelineItemId == marker.Id)
-            {
-                AddFocusTriangle(x, trackTop + trackHeight + 6);
-            }
         }
+
+        DrawEditFocusTriangle(timeline, pps, trackTop, trackHeight);
 
         _playheadLine = new Line
         {
@@ -917,6 +927,46 @@ public partial class TimelineControl : UserControl
         };
         RootCanvas.Children.Add(_playheadLine);
         UpdatePlayhead();
+    }
+
+    private void DrawEditFocusTriangle(
+        Timeline timeline,
+        double pps,
+        double trackTop,
+        double trackHeight)
+    {
+        // Exact marker under the playhead.
+        if (FocusedTimelineItemId is MarkerId markerId)
+        {
+            var marker = timeline.Markers.FirstOrDefault(m => m.Id == markerId);
+            if (marker is not null)
+                AddFocusTriangle(marker.Time.TotalSeconds * pps, trackTop + trackHeight + 6);
+            return;
+        }
+
+        // No markers selected: triangle at the visible center of the playhead's section
+        // (Drop/Restore target between prev/next boundaries).
+        if (_selectedMarkerSet.Count == 0
+            && timeline.TryGetSurroundingBoundaries(Playhead, out var leftId, out var rightId)
+            && TryGetBoundaryPixelX(timeline, leftId, pps, out var spanLeft)
+            && TryGetBoundaryPixelX(timeline, rightId, pps, out var spanRight)
+            && TryGetVisibleSpanCenterX(spanLeft, spanRight, out var sectionMid))
+        {
+            AddFocusTriangle(sectionMid, trackTop + trackHeight + 18);
+            return;
+        }
+
+        // Markers selected but playhead still targets a cut: clamp to the visible run span.
+        if (FocusedTimelineItemId is DeletedRunId runId)
+        {
+            var run = timeline.GetDeletedRuns().FirstOrDefault(r => r.Id == runId);
+            if (run is null)
+                return;
+            var left = run.Range.Start.TotalSeconds * pps;
+            var right = run.Range.End.TotalSeconds * pps;
+            if (TryGetVisibleSpanCenterX(left, right, out var mid))
+                AddFocusTriangle(mid, trackTop + trackHeight + 18);
+        }
     }
 
     private static (double Left, double Right) OverlayPixelBounds(
@@ -1078,12 +1128,14 @@ public partial class TimelineControl : UserControl
             var end = i == timeline.Markers.Count ? timeline.Duration : timeline.Markers[i].Time;
             var left = start.TotalSeconds * pps;
             var right = end.TotalSeconds * pps;
-            var gap = right - left;
             var labelText = FormatKeepDuration(end - start);
-            // Same width estimate used for centering; skip when the keep gap can't fit the text.
             var labelWidth = Math.Max(12, labelText.Length * 3.2);
-            if (gap < labelWidth)
+            // Center in the visible portion of the keep span; skip when that sliver is too narrow.
+            if (!TryGetVisibleSpanCenterX(left, right, out var mid)
+                || VisibleSpanWidth(left, right) < labelWidth)
+            {
                 continue;
+            }
 
             var label = new TextBlock
             {
@@ -1092,11 +1144,77 @@ public partial class TimelineControl : UserControl
                 FontSize = 10,
                 IsHitTestVisible = false
             };
-            var mid = (left + right) / 2;
-            Canvas.SetLeft(label, mid - labelWidth);
+            Canvas.SetLeft(label, mid - labelWidth / 2);
             Canvas.SetTop(label, trackTop + trackHeight + 4);
             RootCanvas.Children.Add(label);
         }
+    }
+
+    /// <summary>
+    /// Center X of <paramref name="spanLeft"/>..<paramref name="spanRight"/> after clamping
+    /// both edges to the current horizontal viewport. False when the span is fully off-screen.
+    /// </summary>
+    private bool TryGetVisibleSpanCenterX(double spanLeft, double spanRight, out double centerX)
+    {
+        var viewLeft = Scroller.HorizontalOffset;
+        var viewport = GetViewportWidth();
+        if (viewport <= 1)
+        {
+            centerX = (spanLeft + spanRight) / 2;
+            return spanRight >= spanLeft;
+        }
+
+        var viewRight = viewLeft + viewport;
+        var left = Math.Max(spanLeft, viewLeft);
+        var right = Math.Min(spanRight, viewRight);
+        if (right < left)
+        {
+            centerX = 0;
+            return false;
+        }
+
+        centerX = (left + right) / 2;
+        return true;
+    }
+
+    private double VisibleSpanWidth(double spanLeft, double spanRight)
+    {
+        var viewLeft = Scroller.HorizontalOffset;
+        var viewport = GetViewportWidth();
+        if (viewport <= 1)
+            return Math.Max(0, spanRight - spanLeft);
+
+        var viewRight = viewLeft + viewport;
+        return Math.Max(0, Math.Min(spanRight, viewRight) - Math.Max(spanLeft, viewLeft));
+    }
+
+    private static bool TryGetBoundaryPixelX(
+        Timeline timeline,
+        MarkerId id,
+        double pps,
+        out double x)
+    {
+        if (id == MarkerId.StartBound)
+        {
+            x = 0;
+            return true;
+        }
+
+        if (id == MarkerId.EndBound)
+        {
+            x = timeline.Duration.TotalSeconds * pps;
+            return true;
+        }
+
+        var marker = timeline.Markers.FirstOrDefault(m => m.Id == id);
+        if (marker is null)
+        {
+            x = 0;
+            return false;
+        }
+
+        x = marker.Time.TotalSeconds * pps;
+        return true;
     }
 
     private static string FormatKeepDuration(TimeSpan duration)

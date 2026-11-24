@@ -270,6 +270,48 @@ public class TimelineTests
     }
 
     [Fact]
+    public void TryGetSurroundingBoundariesFindsNeighbors()
+    {
+        var timeline = CreateWithMarkers(10, 20, 40);
+
+        timeline.TryGetSurroundingBoundaries(TimeSpan.FromSeconds(5), out var left, out var right)
+            .Should().BeTrue();
+        left.Should().Be(MarkerId.StartBound);
+        right.Should().Be(timeline.Markers[0].Id);
+
+        timeline.TryGetSurroundingBoundaries(TimeSpan.FromSeconds(25), out left, out right)
+            .Should().BeTrue();
+        left.Should().Be(timeline.Markers[1].Id);
+        right.Should().Be(timeline.Markers[2].Id);
+
+        timeline.TryGetSurroundingBoundaries(TimeSpan.FromSeconds(50), out left, out right)
+            .Should().BeTrue();
+        left.Should().Be(timeline.Markers[2].Id);
+        right.Should().Be(MarkerId.EndBound);
+    }
+
+    [Fact]
+    public void TryGetSurroundingBoundariesRejectsExactBoundary()
+    {
+        var timeline = CreateWithMarkers(10, 20);
+
+        timeline.TryGetSurroundingBoundaries(TimeSpan.Zero, out _, out _).Should().BeFalse();
+        timeline.TryGetSurroundingBoundaries(timeline.Duration, out _, out _).Should().BeFalse();
+        timeline.TryGetSurroundingBoundaries(TimeSpan.FromSeconds(10), out _, out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryGetSurroundingBoundariesWithNoMarkersSpansWholeTimeline()
+    {
+        var timeline = Timeline.Create(TimeSpan.FromSeconds(60)).RequireOk();
+
+        timeline.TryGetSurroundingBoundaries(TimeSpan.FromSeconds(30), out var left, out var right)
+            .Should().BeTrue();
+        left.Should().Be(MarkerId.StartBound);
+        right.Should().Be(MarkerId.EndBound);
+    }
+
+    [Fact]
     public void CoalesceDeletedRunsResetsToHardCut()
     {
         var timeline = CreateWithMarkers(10, 20, 30, 40, 50);

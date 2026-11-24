@@ -5,10 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2026.11.9] - 2026-11-24
+
+### Added
+
+- Drop Section / Restore Section work with no markers selected: they target the section between the previous and next boundaries around the playhead (playhead must not sit on a marker); the red focus triangle sits at that section’s visible center.
+- Edit timeline: Enter focuses the crossfade field when a cut is selected; Shift+Enter focuses the start-fade field.
+- Preview timeline: Left/Right jump to 2 seconds before the previous/next cut or non-zero fade range (capped at the start), seek-and-pause.
+- Edit sidebar Selection strip: on-demand left/right frames for 1 marker, 2 markers, or a selected cut; click a tile to seek there.
 
 ### Changed
 
+- Playhead nudge (`7` / `8` / `9` and Shift variants) scrolls the playhead into view, matching marker/cut jump keys.
+- Timeline labels and focus marks placed at a span’s center (cut labels, keep-duration labels, section/cut focus triangle) use the center of the **visible** portion of that span when it is partially off-screen.
+- Section removal actions are named **Drop Section** (and from Start / to End) instead of Delete Section, so they do not share a verb with Delete Marker.
+- Edit timeline keys are playhead-driven: Left/Right jump to markers (seek-and-pause); Shift+Left/Right jump to cut centers; S/Shift+S select the item under the playhead (red triangle); Space plays/pauses (P still works); Up/Down removed; 2/3 zoom on the playhead.
+- Keyboard shortcuts dialog: dropped the redundant in-body title; section headers (File, Edit, etc.) use that title's font style; timeline keys section is titled **Timeline navigation**.
 - README hero sample clip is composed from CC0 stills (see `tools/readme-sample/`) instead of SMPTE color bars.
 
 ## [2026.11.8] - 2026-11-23
@@ -120,7 +132,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial GitHub Release of VideoAbridge: open a single finished video, mark and delete sections, scene detection, multiple abridged versions, Edit/Preview modes, joins/fades, undo/redo, marker cache, and FFmpeg export.
 - CI release workflow publishing a self-contained Windows x64 build zip.
 
-[Unreleased]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.8...HEAD
+[Unreleased]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.9...HEAD
+[2026.11.9]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.8...v2026.11.9
 [2026.11.8]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.7...v2026.11.8
 [2026.11.7]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.6...v2026.11.7
 [2026.11.6]: https://github.com/icalvo/VideoAbridge/compare/v2026.11.5...v2026.11.6

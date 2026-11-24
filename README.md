@@ -13,7 +13,7 @@ VideoAbridge is not a general [NLE](https://en.wikipedia.org/wiki/Non-linear_edi
 ### Editing the abridgement
 
 - **Markers** — place user markers at the playhead; select one or more to define section boundaries
-- **Delete / undelete sections** — remove the range between selected markers, or restore it; also delete from the start or through the end of the video
+- **Drop / restore sections** — remove the range between selected markers (or the section under the playhead when none are selected), or restore it; also drop from the start or through the end of the video
 - **Scene detection** — FFmpeg-based scene cuts become shared scene markers (protected from casual delete); detection resumes when you reopen a file
 - **Per-join transitions** — each interior deletion is a hard cut or a crossfade; crossfade length is capped by the adjacent kept segments
 - **Start / end fades** — optional fade from black and fade to black on the abridged output
@@ -52,22 +52,24 @@ Open **Help → Keyboard shortcuts** (or press `?`) for a categorized list. Shor
 | --------------------- | ----------------------------------------- |
 | Ctrl+O                | Open Video                                |
 | Ctrl+S                | Export                                    |
-| P                     | Play / Pause                              |
+| Space / P             | Play / Pause                              |
 | Home                  | Go to Beginning                           |
 | 7 / 8 / 9             | Nudge playhead +1 frame / +1s / +10s      |
 | Shift+7 / 8 / 9       | Nudge playhead −1 frame / −1s / −10s      |
 | Ctrl+Z / Ctrl+Y       | Undo / Redo                               |
 | M                     | Add Marker                                |
-| Delete                | Delete Marker / Delete Section            |
+| Delete                | Delete Marker / Drop Section              |
 | Shift+Delete          | Restore Section                           |
-| Ctrl+Home / End       | Delete Section from Start / to End        |
+| Ctrl+Home / End       | Drop Section from Start / to End          |
 | Ctrl+Shift+Home / End | Restore Section from Start / to End       |
 | Ctrl+D                | Detect Scenes                             |
 | E                     | Toggle Edit / Preview                     |
-| Left / Right          | Focus previous / next marker or cut (Edit)|
-| Up / Down             | Focus nearest item in the other lane (Edit)|
-| Space / Shift+Space   | Click / Shift-click focused item (Edit)   |
-| 2 / 3                 | Zoom in / out on focused marker or cut    |
+| Left / Right          | Edit: previous / next marker; Preview: 2s before cut / fade |
+| Shift+Left / Right    | Jump playhead to previous / next cut center (Edit)|
+| S / Shift+S           | Click / Shift-click item under playhead (Edit)|
+| Enter                 | Edit crossfade (selected cut, Edit)       |
+| Shift+Enter           | Edit start fade (Edit)                    |
+| 2 / 3                 | Zoom in / out on playhead                 |
 | 1 / 0                 | Zoom to abridged content / Zoom to fit    |
 | Ctrl+N / Ctrl+Shift+N | New / Duplicate Version                   |
 | Ctrl+Tab / Ctrl+Shift+Tab | Next / Previous Version               |
@@ -125,7 +127,7 @@ Package sources live under [`packaging/chocolatey/`](packaging/chocolatey/).
 ## Typical workflow
 
 1. **File → Open Video** (or **Recent Files**) — probes duration, restores cached versions/edits if present, resumes scene detection when needed.
-2. Add markers (manually and/or **Detect Scenes**), select boundaries, **Delete** / **Restore Section** (or from start / to end).
+2. Add markers (manually and/or **Detect Scenes**), select boundaries, **Drop** / **Restore Section** (or from start / to end).
 3. Click a **Cut** / **XF** under a deleted interior run to set hard cut vs crossfade; set start/end fades in the side panel (`0` = off).
 4. Toggle **Preview** to scrub the abridged result; use **View → Zoom to abridged content / Zoom to fit** as needed.
 5. Optionally create more versions (**Version** menu) for alternate short cuts of the same file.

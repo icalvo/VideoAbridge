@@ -36,10 +36,10 @@ public partial class MainWindow : Window, IDisposable
             () => Timeline.ZoomToFit(),
             () => _viewModel.HasVideoLoaded);
         _zoomInOnFocusCommand = new RelayCommand(
-            () => Timeline.ZoomAroundFocus(zoomIn: true),
+            () => Timeline.ZoomAroundPlayhead(zoomIn: true),
             () => _viewModel.HasVideoLoaded);
         _zoomOutOnFocusCommand = new RelayCommand(
-            () => Timeline.ZoomAroundFocus(zoomIn: false),
+            () => Timeline.ZoomAroundPlayhead(zoomIn: false),
             () => _viewModel.HasVideoLoaded);
 
         InitializeComponent();
@@ -53,12 +53,11 @@ public partial class MainWindow : Window, IDisposable
                 _zoomToFitCommand.NotifyCanExecuteChanged();
                 _zoomInOnFocusCommand.NotifyCanExecuteChanged();
                 _zoomOutOnFocusCommand.NotifyCanExecuteChanged();
-                if (_viewModel.HasVideoLoaded && !_viewModel.IsPreviewMode)
+                if (_viewModel.HasVideoLoaded)
                     Dispatcher.BeginInvoke(FocusTimeline, DispatcherPriority.Loaded);
             }
 
             if (e.PropertyName is nameof(MainViewModel.IsPreviewMode)
-                && !_viewModel.IsPreviewMode
                 && _viewModel.HasVideoLoaded)
             {
                 Dispatcher.BeginInvoke(FocusTimeline, DispatcherPriority.Input);
@@ -501,9 +500,23 @@ public partial class MainWindow : Window, IDisposable
         box.SelectAll();
     }
 
+    private void SelectionPreviewLeft_Click(object sender, RoutedEventArgs e)
+    {
+        _viewModel.SeekSelectionPreview(left: true);
+        Timeline.EnsurePlayheadVisible();
+        FocusTimeline();
+    }
+
+    private void SelectionPreviewRight_Click(object sender, RoutedEventArgs e)
+    {
+        _viewModel.SeekSelectionPreview(left: false);
+        Timeline.EnsurePlayheadVisible();
+        FocusTimeline();
+    }
+
     private void FocusTimeline()
     {
-        if (!_viewModel.HasVideoLoaded || _viewModel.IsPreviewMode)
+        if (!_viewModel.HasVideoLoaded)
             return;
         Timeline.Focus();
     }
@@ -541,12 +554,15 @@ public partial class MainWindow : Window, IDisposable
 
         var mods = Keyboard.Modifiers;
 
-        if (!_viewModel.IsPreviewMode
-            && Timeline.IsKeyboardFocusWithin
-            && TryHandleTimelineFocusKeys(mods, e.Key))
+        if (Timeline.IsKeyboardFocusWithin)
         {
-            e.Handled = true;
-            return;
+            if (_viewModel.IsPreviewMode
+                ? TryHandlePreviewTimelineKeys(mods, e.Key)
+                : TryHandleTimelineFocusKeys(mods, e.Key))
+            {
+                e.Handled = true;
+                return;
+            }
         }
 
         var handled = mods switch
@@ -570,9 +586,9 @@ public partial class MainWindow : Window, IDisposable
             ModifierKeys.Control when e.Key is Key.T =>
                 TryExecute(_viewModel.ToggleTasksPaneCommand),
             ModifierKeys.Control when e.Key is Key.Home =>
-                TryExecute(_viewModel.DeleteSectionFromStartCommand),
+                TryExecute(_viewModel.DropSectionFromStartCommand),
             ModifierKeys.Control when e.Key is Key.End =>
-                TryExecute(_viewModel.DeleteSectionToEndCommand),
+                TryExecute(_viewModel.DropSectionToEndCommand),
             ModifierKeys.Control when e.Key is Key.N =>
                 TryExecute(_viewModel.CreateVersionCommand),
             ModifierKeys.Control when e.Key is Key.M =>
@@ -589,15 +605,15 @@ public partial class MainWindow : Window, IDisposable
                 TryNudgePlayhead(TimeSpan.FromSeconds(-1)),
             ModifierKeys.Shift when e.Key is Key.D9 or Key.NumPad9 =>
                 TryNudgePlayhead(TimeSpan.FromSeconds(-10)),
-            ModifierKeys.None when e.Key is Key.P =>
+            ModifierKeys.None when e.Key is Key.P or Key.Space =>
                 TryExecute(_viewModel.PlayPauseCommand),
             ModifierKeys.None when e.Key is Key.Home =>
                 TryExecute(_viewModel.GoToBeginningCommand),
             ModifierKeys.None when e.Key is Key.M =>
                 TryExecute(_viewModel.AddMarkerAtPlayheadCommand),
-            // Mutually exclusive CanExecute: 1 marker → delete marker; 2 markers → delete section.
+            // Mutually exclusive CanExecute: 1 marker → delete marker; 2 markers → drop section.
             ModifierKeys.None when e.Key is Key.Delete =>
-                TryExecute(_viewModel.DeleteSectionCommand)
+                TryExecute(_viewModel.DropSectionCommand)
                 || TryExecute(_viewModel.DeleteMarkerCommand),
             ModifierKeys.None when e.Key is Key.E =>
                 TryExecute(_viewModel.TogglePreviewModeCommand),
@@ -632,38 +648,85 @@ public partial class MainWindow : Window, IDisposable
         base.OnPreviewKeyDown(e);
     }
 
+    private bool TryHandlePreviewTimelineKeys(ModifierKeys mods, Key key)
+    {
+        if (mods != ModifierKeys.None)
+            return false;
+
+        if (key is Key.Left)
+        {
+            if (_viewModel.JumpAbridgedPlayheadToOverlay(-1))
+                Timeline.EnsurePlayheadVisible();
+            return true;
+        }
+
+        if (key is Key.Right)
+        {
+            if (_viewModel.JumpAbridgedPlayheadToOverlay(1))
+                Timeline.EnsurePlayheadVisible();
+            return true;
+        }
+
+        return false;
+    }
+
     private bool TryHandleTimelineFocusKeys(ModifierKeys mods, Key key)
     {
         if (mods == ModifierKeys.None)
         {
             if (key is Key.Left)
             {
-                _viewModel.MoveTimelineFocusHorizontal(-1);
+                if (_viewModel.JumpPlayheadToMarker(-1))
+                    Timeline.EnsurePlayheadVisible();
                 return true;
             }
 
             if (key is Key.Right)
             {
-                _viewModel.MoveTimelineFocusHorizontal(1);
+                if (_viewModel.JumpPlayheadToMarker(1))
+                    Timeline.EnsurePlayheadVisible();
                 return true;
             }
 
-            if (key is Key.Up or Key.Down)
-            {
-                _viewModel.MoveTimelineFocusVertical();
-                return true;
-            }
-
-            if (key is Key.Space)
+            if (key is Key.S)
             {
                 _viewModel.ActivateTimelineFocus(extendSelection: false);
                 return true;
             }
+
+            if (key is Key.Enter && _viewModel.HasSelectedJoin)
+            {
+                FocusFadeTextBox(CrossfadeTextBox);
+                return true;
+            }
         }
-        else if (mods == ModifierKeys.Shift && key is Key.Space)
+        else if (mods == ModifierKeys.Shift)
         {
-            _viewModel.ActivateTimelineFocus(extendSelection: true);
-            return true;
+            if (key is Key.Left)
+            {
+                if (_viewModel.JumpPlayheadToCutCenter(-1))
+                    Timeline.EnsurePlayheadVisible();
+                return true;
+            }
+
+            if (key is Key.Right)
+            {
+                if (_viewModel.JumpPlayheadToCutCenter(1))
+                    Timeline.EnsurePlayheadVisible();
+                return true;
+            }
+
+            if (key is Key.S)
+            {
+                _viewModel.ActivateTimelineFocus(extendSelection: true);
+                return true;
+            }
+
+            if (key is Key.Enter)
+            {
+                FocusFadeTextBox(StartFadeTextBox);
+                return true;
+            }
         }
 
         return false;
@@ -682,6 +745,7 @@ public partial class MainWindow : Window, IDisposable
         if (!_viewModel.CanNudgePlayhead())
             return false;
         _viewModel.NudgePlayhead(delta);
+        Timeline.EnsurePlayheadVisible();
         return true;
     }
 

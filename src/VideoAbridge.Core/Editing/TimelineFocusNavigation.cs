@@ -1,160 +1,124 @@
 namespace VideoAbridge.Core.Editing;
 
 /// <summary>
-/// Edit-mode timeline keyboard focus: two lanes (markers vs deleted runs),
-/// horizontal prev/next with clamp, vertical nearest-in-time (tie → earlier).
+/// Edit-mode playhead-driven timeline focus: derive the S/Shift+S target from the
+/// playhead, and compute prev/next marker or deleted-run center jump targets.
 /// </summary>
 public static class TimelineFocusNavigation
 {
-    public static TimelineItemId? MoveHorizontal(
-        TimelineItemId? current,
-        int direction,
+    /// <summary>
+    /// Exact marker at <paramref name="playhead"/>, else deleted run containing it, else null.
+    /// Marker wins when both apply (boundary markers).
+    /// </summary>
+    public static TimelineItemId? ResolveAtPlayhead(
+        TimeSpan playhead,
         IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> markers,
-        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> deletedRuns)
+        IReadOnlyList<(TimelineItemId Id, TimeSpan Start, TimeSpan End)> deletedRuns)
     {
         ArgumentNullException.ThrowIfNull(markers);
         ArgumentNullException.ThrowIfNull(deletedRuns);
-        if (direction == 0)
-            return current;
 
-        if (current is not { } focus)
-            return PickDefault(markers, deletedRuns);
-
-        var lane = focus switch
+        foreach (var (id, time) in markers)
         {
-            MarkerId => markers,
-            DeletedRunId => deletedRuns,
-        };
+            if (time == playhead)
+                return id;
+        }
 
-        if (lane.Count == 0)
-            return focus;
-
-        var index = IndexOf(lane, focus);
-        if (index < 0)
-            return NearestInLane(lane, TimeSpan.Zero);
-
-        var next = Math.Clamp(index + Math.Sign(direction), 0, lane.Count - 1);
-        return lane[next].Id;
-    }
-
-    public static TimelineItemId? MoveVertical(
-        TimelineItemId? current,
-        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> markers,
-        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> deletedRuns)
-    {
-        ArgumentNullException.ThrowIfNull(markers);
-        ArgumentNullException.ThrowIfNull(deletedRuns);
-
-        if (current is not { } focus)
-            return PickDefault(markers, deletedRuns);
-
-        return focus switch
+        foreach (var (id, start, end) in deletedRuns)
         {
-            MarkerId => deletedRuns.Count == 0
-                ? focus
-                : NearestInLane(deletedRuns, TimeOf(markers, focus) ?? TimeSpan.Zero) ?? focus,
-            DeletedRunId => markers.Count == 0
-                ? focus
-                : NearestInLane(markers, TimeOf(deletedRuns, focus) ?? TimeSpan.Zero) ?? focus,
-        };
-    }
+            if (playhead >= start && playhead <= end)
+                return id;
+        }
 
-    /// <summary>Nearest marker to <paramref name="time"/>, else nearest deleted run, else null.</summary>
-    public static TimelineItemId? NearestToTime(
-        TimeSpan time,
-        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> markers,
-        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> deletedRuns)
-    {
-        ArgumentNullException.ThrowIfNull(markers);
-        ArgumentNullException.ThrowIfNull(deletedRuns);
-
-        return NearestInLane(markers, time) ?? NearestInLane(deletedRuns, time);
+        return null;
     }
 
     /// <summary>
-    /// After the focused item disappears: nearest remaining in the same lane,
-    /// else the other lane, else null.
+    /// Previous marker strictly before <paramref name="playhead"/>; if already on a marker,
+    /// the neighbor before it. Clamps to the earliest marker (no wrap). Null if none.
     /// </summary>
-    public static TimelineItemId? AfterRemoval(
-        TimelineItemId removed,
-        TimeSpan removedTime,
-        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> markers,
-        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> deletedRuns)
+    public static TimeSpan? PreviousMarkerTime(
+        TimeSpan playhead,
+        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> markers)
     {
         ArgumentNullException.ThrowIfNull(markers);
-        ArgumentNullException.ThrowIfNull(deletedRuns);
-
-        var (sameLane, otherLane) = removed switch
+        TimeSpan? best = null;
+        foreach (var (_, time) in markers)
         {
-            MarkerId => (markers, deletedRuns),
-            DeletedRunId => (deletedRuns, markers),
-        };
+            if (time >= playhead)
+                continue;
+            if (best is null || time > best.Value)
+                best = time;
+        }
 
-        return NearestInLane(sameLane, removedTime) ?? NearestInLane(otherLane, removedTime);
+        return best;
     }
 
-    public static TimelineItemId? PickDefault(
-        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> markers,
-        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> deletedRuns)
+    /// <summary>
+    /// Next marker strictly after <paramref name="playhead"/>; if already on a marker,
+    /// the neighbor after it. Clamps to the latest marker (no wrap). Null if none.
+    /// </summary>
+    public static TimeSpan? NextMarkerTime(
+        TimeSpan playhead,
+        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> markers)
     {
         ArgumentNullException.ThrowIfNull(markers);
+        TimeSpan? best = null;
+        foreach (var (_, time) in markers)
+        {
+            if (time <= playhead)
+                continue;
+            if (best is null || time < best.Value)
+                best = time;
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// Previous deleted-run center strictly before <paramref name="playhead"/>.
+    /// Clamps to the earliest center (no wrap). Null if none.
+    /// </summary>
+    public static TimeSpan? PreviousCutCenter(
+        TimeSpan playhead,
+        IReadOnlyList<(TimelineItemId Id, TimeSpan Start, TimeSpan End)> deletedRuns)
+    {
         ArgumentNullException.ThrowIfNull(deletedRuns);
-
-        if (markers.Count > 0)
-            return markers[0].Id;
-        if (deletedRuns.Count > 0)
-            return deletedRuns[0].Id;
-        return null;
-    }
-
-    /// <summary>Nearest id by absolute time distance; ties prefer the earlier item.</summary>
-    public static TimelineItemId? NearestInLane(
-        IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> lane,
-        TimeSpan time)
-    {
-        ArgumentNullException.ThrowIfNull(lane);
-        if (lane.Count == 0)
-            return null;
-
-        TimelineItemId? bestId = null;
-        var bestDist = TimeSpan.MaxValue;
-        var bestTime = TimeSpan.MaxValue;
-
-        foreach (var (id, itemTime) in lane)
+        TimeSpan? best = null;
+        foreach (var (_, start, end) in deletedRuns)
         {
-            var dist = AbsDiff(itemTime, time);
-            if (dist < bestDist || (dist == bestDist && itemTime < bestTime))
-            {
-                bestDist = dist;
-                bestTime = itemTime;
-                bestId = id;
-            }
+            var center = Midpoint(start, end);
+            if (center >= playhead)
+                continue;
+            if (best is null || center > best.Value)
+                best = center;
         }
 
-        return bestId;
+        return best;
     }
 
-    private static int IndexOf(IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> lane, TimelineItemId id)
+    /// <summary>
+    /// Next deleted-run center strictly after <paramref name="playhead"/>.
+    /// Clamps to the latest center (no wrap). Null if none.
+    /// </summary>
+    public static TimeSpan? NextCutCenter(
+        TimeSpan playhead,
+        IReadOnlyList<(TimelineItemId Id, TimeSpan Start, TimeSpan End)> deletedRuns)
     {
-        for (var i = 0; i < lane.Count; i++)
+        ArgumentNullException.ThrowIfNull(deletedRuns);
+        TimeSpan? best = null;
+        foreach (var (_, start, end) in deletedRuns)
         {
-            if (lane[i].Id == id)
-                return i;
+            var center = Midpoint(start, end);
+            if (center <= playhead)
+                continue;
+            if (best is null || center < best.Value)
+                best = center;
         }
 
-        return -1;
+        return best;
     }
 
-    private static TimeSpan? TimeOf(IReadOnlyList<(TimelineItemId Id, TimeSpan Time)> lane, TimelineItemId id)
-    {
-        foreach (var (itemId, time) in lane)
-        {
-            if (itemId == id)
-                return time;
-        }
-
-        return null;
-    }
-
-    private static TimeSpan AbsDiff(TimeSpan a, TimeSpan b) => a > b ? a - b : b - a;
+    private static TimeSpan Midpoint(TimeSpan start, TimeSpan end) =>
+        TimeSpan.FromTicks((start.Ticks + end.Ticks) / 2);
 }

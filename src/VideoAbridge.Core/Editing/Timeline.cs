@@ -310,6 +310,40 @@ public sealed class Timeline
         ApplyDeletionFlags(boundaryIdA, boundaryIdB, deleted: false);
 
     /// <summary>
+    /// Resolves the marker (or start/end) boundaries that enclose <paramref name="time"/>.
+    /// Fails when <paramref name="time"/> is outside the open timeline or exactly on a boundary.
+    /// </summary>
+    public bool TryGetSurroundingBoundaries(TimeSpan time, out MarkerId left, out MarkerId right)
+    {
+        left = default;
+        right = default;
+        if (time <= TimeSpan.Zero || time >= Duration)
+            return false;
+
+        left = MarkerId.StartBound;
+        right = MarkerId.EndBound;
+        foreach (var marker in Markers)
+        {
+            if (marker.Time == time)
+            {
+                left = default;
+                right = default;
+                return false;
+            }
+
+            if (marker.Time < time)
+                left = marker.Id;
+            else
+            {
+                right = marker.Id;
+                break;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// True when the open range between the boundaries contains at least one segment whose
     /// deleted flag equals <paramref name="isDeleted"/>.
     /// </summary>

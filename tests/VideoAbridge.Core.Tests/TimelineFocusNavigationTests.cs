@@ -18,115 +18,113 @@ public class TimelineFocusNavigationTests
         (M3, TimeSpan.FromSeconds(40)),
     ];
 
-    private static readonly (TimelineItemId Id, TimeSpan Time)[] Runs =
+    // Centers: D1@7.5, D2@27.5, D3@55
+    private static readonly (TimelineItemId Id, TimeSpan Start, TimeSpan End)[] Runs =
     [
-        (D1, TimeSpan.FromSeconds(5)),
-        (D2, TimeSpan.FromSeconds(25)),
-        (D3, TimeSpan.FromSeconds(50)),
+        (D1, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)),
+        (D2, TimeSpan.FromSeconds(25), TimeSpan.FromSeconds(30)),
+        (D3, TimeSpan.FromSeconds(50), TimeSpan.FromSeconds(60)),
     ];
 
     [Fact]
-    public void MoveHorizontalClampsAtEnds()
+    public void ResolveAtPlayheadPrefersExactMarkerOverContainingCut()
     {
-        TimelineItemId atFirst = M1;
-        TimelineFocusNavigation.MoveHorizontal(atFirst, -1, Markers, Runs)
-            .Should().Be(atFirst);
-
-        TimelineItemId atLast = M3;
-        TimelineFocusNavigation.MoveHorizontal(atLast, 1, Markers, Runs)
-            .Should().Be(atLast);
-    }
-
-    [Fact]
-    public void MoveHorizontalStepsWithinLane()
-    {
-        TimelineItemId current = M1;
-        var next = TimelineFocusNavigation.MoveHorizontal(current, 1, Markers, Runs);
-        next.Should().Be((TimelineItemId)M2);
-
-        TimelineItemId run = D1;
-        TimelineFocusNavigation.MoveHorizontal(run, 1, Markers, Runs)
-            .Should().Be((TimelineItemId)D2);
-    }
-
-    [Fact]
-    public void MoveVerticalFromMarkerPicksNearestDeletedRun()
-    {
-        // M2@20 → nearer D2@25 than D1@5
-        TimelineItemId current = M2;
-        TimelineFocusNavigation.MoveVertical(current, Markers, Runs)
-            .Should().Be((TimelineItemId)D2);
-    }
-
-    [Fact]
-    public void MoveVerticalFromDeletedRunPicksNearestMarker()
-    {
-        TimelineItemId current = D2;
-        TimelineFocusNavigation.MoveVertical(current, Markers, Runs)
-            .Should().Be((TimelineItemId)M2);
-    }
-
-    [Fact]
-    public void MoveVerticalTiePrefersEarlier()
-    {
-        // Focus mid between M1@10 and M2@20 at deleted D@15 → equidistant markers
-        (TimelineItemId Id, TimeSpan Time)[] markers =
-        [
-            (M1, TimeSpan.FromSeconds(10)),
-            (M2, TimeSpan.FromSeconds(20)),
-        ];
-        (TimelineItemId Id, TimeSpan Time)[] runs =
-        [
-            (D1, TimeSpan.FromSeconds(15)),
-        ];
-
-        TimelineItemId current = D1;
-        TimelineFocusNavigation.MoveVertical(current, markers, runs)
+        // M1@10 is also the end of D1 [5,10]
+        TimelineFocusNavigation.ResolveAtPlayhead(TimeSpan.FromSeconds(10), Markers, Runs)
             .Should().Be((TimelineItemId)M1);
     }
 
     [Fact]
-    public void MoveVerticalEmptyOtherLaneKeepsCurrent()
+    public void ResolveAtPlayheadUsesContainingCutWhenNoExactMarker()
     {
-        TimelineItemId current = M1;
-        TimelineFocusNavigation.MoveVertical(current, Markers, [])
-            .Should().Be(current);
-    }
-
-    [Fact]
-    public void NearestToTimePrefersMarkers()
-    {
-        TimelineFocusNavigation.NearestToTime(TimeSpan.FromSeconds(24), Markers, Runs)
-            .Should().Be((TimelineItemId)M2);
-    }
-
-    [Fact]
-    public void NearestToTimeFallsBackToDeletedRuns()
-    {
-        TimelineFocusNavigation.NearestToTime(TimeSpan.FromSeconds(24), [], Runs)
+        TimelineFocusNavigation.ResolveAtPlayhead(TimeSpan.FromSeconds(27), Markers, Runs)
             .Should().Be((TimelineItemId)D2);
     }
 
     [Fact]
-    public void AfterRemovalPrefersSameLane()
+    public void ResolveAtPlayheadReturnsNullInKeptSection()
     {
-        TimelineItemId removed = M2;
-        (TimelineItemId Id, TimeSpan Time)[] remaining =
-        [
-            (M1, TimeSpan.FromSeconds(10)),
-            (M3, TimeSpan.FromSeconds(40)),
-        ];
-
-        TimelineFocusNavigation.AfterRemoval(removed, TimeSpan.FromSeconds(20), remaining, Runs)
-            .Should().Be((TimelineItemId)M1);
+        TimelineFocusNavigation.ResolveAtPlayhead(TimeSpan.FromSeconds(15), Markers, Runs)
+            .Should().BeNull();
     }
 
     [Fact]
-    public void AfterRemovalFallsBackToOtherLane()
+    public void ResolveAtPlayheadRequiresExactMarkerTime()
     {
-        TimelineItemId removed = M1;
-        TimelineFocusNavigation.AfterRemoval(removed, TimeSpan.FromSeconds(10), [], Runs)
-            .Should().Be((TimelineItemId)D1);
+        TimelineFocusNavigation.ResolveAtPlayhead(TimeSpan.FromSeconds(10.001), Markers, Runs)
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public void PreviousMarkerStepsFromExactMarker()
+    {
+        TimelineFocusNavigation.PreviousMarkerTime(TimeSpan.FromSeconds(20), Markers)
+            .Should().Be(TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
+    public void PreviousMarkerFromBetweenMarkers()
+    {
+        TimelineFocusNavigation.PreviousMarkerTime(TimeSpan.FromSeconds(25), Markers)
+            .Should().Be(TimeSpan.FromSeconds(20));
+    }
+
+    [Fact]
+    public void PreviousMarkerAtFirstReturnsNull()
+    {
+        TimelineFocusNavigation.PreviousMarkerTime(TimeSpan.FromSeconds(10), Markers)
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public void NextMarkerStepsFromExactMarker()
+    {
+        TimelineFocusNavigation.NextMarkerTime(TimeSpan.FromSeconds(20), Markers)
+            .Should().Be(TimeSpan.FromSeconds(40));
+    }
+
+    [Fact]
+    public void NextMarkerAtLastReturnsNull()
+    {
+        TimelineFocusNavigation.NextMarkerTime(TimeSpan.FromSeconds(40), Markers)
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public void PreviousCutCenterStepsFromExactCenter()
+    {
+        // D2 center = 27.5 → D1 center = 7.5
+        TimelineFocusNavigation.PreviousCutCenter(TimeSpan.FromSeconds(27.5), Runs)
+            .Should().Be(TimeSpan.FromSeconds(7.5));
+    }
+
+    [Fact]
+    public void NextCutCenterFromBeforeCenterLandsOnThatCenter()
+    {
+        // Playhead inside D2 but before its center → next is D2@27.5
+        TimelineFocusNavigation.NextCutCenter(TimeSpan.FromSeconds(26), Runs)
+            .Should().Be(TimeSpan.FromSeconds(27.5));
+    }
+
+    [Fact]
+    public void NextCutCenterFromAfterCenterGoesToFollowingCut()
+    {
+        TimelineFocusNavigation.NextCutCenter(TimeSpan.FromSeconds(28), Runs)
+            .Should().Be(TimeSpan.FromSeconds(55));
+    }
+
+    [Fact]
+    public void NextCutCenterAtLastReturnsNull()
+    {
+        TimelineFocusNavigation.NextCutCenter(TimeSpan.FromSeconds(55), Runs)
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public void PreviousCutCenterAtFirstReturnsNull()
+    {
+        TimelineFocusNavigation.PreviousCutCenter(TimeSpan.FromSeconds(7.5), Runs)
+            .Should().BeNull();
     }
 
     [Fact]
@@ -139,9 +137,9 @@ public class TimelineFocusNavigationTests
     }
 
     [Fact]
-    public void NearestToTimeReturnsNullWhenEmpty()
+    public void ResolveAtPlayheadReturnsNullWhenEmpty()
     {
-        TimelineFocusNavigation.NearestToTime(TimeSpan.FromSeconds(1), [], [])
+        TimelineFocusNavigation.ResolveAtPlayhead(TimeSpan.FromSeconds(1), [], [])
             .Should().BeNull();
     }
 }

@@ -11,8 +11,8 @@
         PreviewKeyDown="Window_PreviewKeyDown">
     <Window.Resources>
         <Style x:Key="CategoryHeader" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#CCCCCC"/>
-            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="13"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Margin" Value="0,0,0,3"/>
         </Style>
@@ -32,12 +32,6 @@
         </Style>
     </Window.Resources>
     <DockPanel Margin="14,12,14,10">
-        <TextBlock DockPanel.Dock="Top"
-                   Text="Keyboard shortcuts"
-                   Foreground="White"
-                   FontSize="13"
-                   FontWeight="SemiBold"
-                   Margin="0,0,0,8"/>
         <Button DockPanel.Dock="Bottom"
                 Content="Close"
                 Width="72"
@@ -88,7 +82,7 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     <TextBlock Grid.Row="0" Grid.Column="0" Text="Play / Pause" Style="{StaticResource ShortcutAction}"/>
-                    <TextBlock Grid.Row="0" Grid.Column="1" Text="P" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="0" Grid.Column="1" Text="Space / P" Style="{StaticResource ShortcutKeys}"/>
                     <TextBlock Grid.Row="1" Grid.Column="0" Text="Go to Beginning" Style="{StaticResource ShortcutAction}"/>
                     <TextBlock Grid.Row="1" Grid.Column="1" Text="Home" Style="{StaticResource ShortcutKeys}"/>
                     <TextBlock Grid.Row="2" Grid.Column="0" Text="Nudge playhead +1 frame / 1s / 10s" Style="{StaticResource ShortcutAction}"/>
@@ -97,7 +91,7 @@
                     <TextBlock Grid.Row="3" Grid.Column="1" Text="Shift+7 / 8 / 9" Style="{StaticResource ShortcutKeys}"/>
                     <TextBlock Grid.Row="4" Grid.Column="0" Text="Toggle Edit / Preview" Style="{StaticResource ShortcutAction}"/>
                     <TextBlock Grid.Row="4" Grid.Column="1" Text="E" Style="{StaticResource ShortcutKeys}"/>
-                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Zoom in / out on focus" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Zoom in / out on playhead" Style="{StaticResource ShortcutAction}"/>
                     <TextBlock Grid.Row="5" Grid.Column="1" Text="2 / 3" Style="{StaticResource ShortcutKeys}"/>
                     <TextBlock Grid.Row="6" Grid.Column="0" Text="Zoom to abridged content" Style="{StaticResource ShortcutAction}"/>
                     <TextBlock Grid.Row="6" Grid.Column="1" Text="1" Style="{StaticResource ShortcutKeys}"/>
@@ -137,13 +131,13 @@
                     <TextBlock Grid.Row="2" Grid.Column="1" Text="M" Style="{StaticResource ShortcutKeys}"/>
                     <TextBlock Grid.Row="3" Grid.Column="0" Text="Move Marker to Playhead" Style="{StaticResource ShortcutAction}"/>
                     <TextBlock Grid.Row="3" Grid.Column="1" Text="Ctrl+M" Style="{StaticResource ShortcutKeys}"/>
-                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Delete Marker / Section" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Delete Marker / Drop Section" Style="{StaticResource ShortcutAction}"/>
                     <TextBlock Grid.Row="4" Grid.Column="1" Text="Delete" Style="{StaticResource ShortcutKeys}"/>
                     <TextBlock Grid.Row="5" Grid.Column="0" Text="Restore Section" Style="{StaticResource ShortcutAction}"/>
                     <TextBlock Grid.Row="5" Grid.Column="1" Text="Shift+Delete" Style="{StaticResource ShortcutKeys}"/>
-                    <TextBlock Grid.Row="6" Grid.Column="0" Text="Delete Section from Start" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="6" Grid.Column="0" Text="Drop Section from Start" Style="{StaticResource ShortcutAction}"/>
                     <TextBlock Grid.Row="6" Grid.Column="1" Text="Ctrl+Home" Style="{StaticResource ShortcutKeys}"/>
-                    <TextBlock Grid.Row="7" Grid.Column="0" Text="Delete Section to End" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="7" Grid.Column="0" Text="Drop Section to End" Style="{StaticResource ShortcutAction}"/>
                     <TextBlock Grid.Row="7" Grid.Column="1" Text="Ctrl+End" Style="{StaticResource ShortcutKeys}"/>
                     <TextBlock Grid.Row="8" Grid.Column="0" Text="Restore Section from Start" Style="{StaticResource ShortcutAction}"/>
                     <TextBlock Grid.Row="8" Grid.Column="1" Text="Ctrl+Shift+Home" Style="{StaticResource ShortcutKeys}"/>
@@ -154,9 +148,9 @@
                 </Grid>
             </StackPanel>
 
-            <!-- Timeline (Edit) -->
+            <!-- Timeline navigation -->
             <StackPanel Margin="0,0,0,10">
-                <TextBlock Text="Timeline (Edit)" Style="{StaticResource CategoryHeader}"/>
+                <TextBlock Text="Timeline navigation" Style="{StaticResource CategoryHeader}"/>
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -167,15 +161,24 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
-                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Previous / next marker or cut" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Previous / next marker (Edit)" Style="{StaticResource ShortcutAction}"/>
                     <TextBlock Grid.Row="0" Grid.Column="1" Text="Left / Right" Style="{StaticResource ShortcutKeys}"/>
-                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Nearest item in other lane" Style="{StaticResource ShortcutAction}"/>
-                    <TextBlock Grid.Row="1" Grid.Column="1" Text="Up / Down" Style="{StaticResource ShortcutKeys}"/>
-                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Activate focused item" Style="{StaticResource ShortcutAction}"/>
-                    <TextBlock Grid.Row="2" Grid.Column="1" Text="Space" Style="{StaticResource ShortcutKeys}"/>
-                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Shift-activate focused item" Style="{StaticResource ShortcutAction}"/>
-                    <TextBlock Grid.Row="3" Grid.Column="1" Text="Shift+Space" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="2s before cut / fade (Preview)" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="1" Grid.Column="1" Text="Left / Right" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Previous / next cut center (Edit)" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="2" Grid.Column="1" Text="Shift+Left / Right" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Select item under playhead (Edit)" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="3" Grid.Column="1" Text="S" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Shift-select item under playhead (Edit)" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="4" Grid.Column="1" Text="Shift+S" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Edit crossfade (selected cut)" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="5" Grid.Column="1" Text="Enter" Style="{StaticResource ShortcutKeys}"/>
+                    <TextBlock Grid.Row="6" Grid.Column="0" Text="Edit start fade" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="6" Grid.Column="1" Text="Shift+Enter" Style="{StaticResource ShortcutKeys}"/>
                 </Grid>
             </StackPanel>
 

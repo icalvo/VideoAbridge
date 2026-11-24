@@ -246,25 +246,25 @@
                           ToolTip="{Binding DeleteMarkerToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
                 <Separator/>
-                <MenuItem Header="_Delete Section"
-                          Command="{Binding DeleteSectionCommand}"
+                <MenuItem Header="_Drop Section"
+                          Command="{Binding DropSectionCommand}"
                           InputGestureText="Delete"
-                          ToolTip="{Binding DeleteSectionToolTip}"
+                          ToolTip="{Binding DropSectionToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
                 <MenuItem Header="Res_tore Section"
                           Command="{Binding RestoreSectionCommand}"
                           InputGestureText="Shift+Delete"
                           ToolTip="{Binding RestoreSectionToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
-                <MenuItem Header="Delete Section from _Start"
-                          Command="{Binding DeleteSectionFromStartCommand}"
+                <MenuItem Header="Drop Section from _Start"
+                          Command="{Binding DropSectionFromStartCommand}"
                           InputGestureText="Ctrl+Home"
-                          ToolTip="{Binding DeleteSectionFromStartToolTip}"
+                          ToolTip="{Binding DropSectionFromStartToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
-                <MenuItem Header="Delete Section to _End"
-                          Command="{Binding DeleteSectionToEndCommand}"
+                <MenuItem Header="Drop Section to _End"
+                          Command="{Binding DropSectionToEndCommand}"
                           InputGestureText="Ctrl+End"
-                          ToolTip="{Binding DeleteSectionToEndToolTip}"
+                          ToolTip="{Binding DropSectionToEndToolTip}"
                           ToolTipService.ShowOnDisabled="True"/>
                 <MenuItem Header="Restore Section from St_art"
                           Command="{Binding RestoreSectionFromStartCommand}"
@@ -291,7 +291,7 @@
                           ToolTipService.ShowOnDisabled="True"/>
                 <MenuItem Header="_Play / Pause"
                           Command="{Binding PlayPauseCommand}"
-                          InputGestureText="P"/>
+                          InputGestureText="Space"/>
                 <MenuItem Header="Go to _Beginning"
                           Command="{Binding GoToBeginningCommand}"
                           InputGestureText="Home"/>
@@ -305,10 +305,10 @@
                 <MenuItem Header="Zoom to _fit"
                           Command="{Binding ZoomToFitCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                           InputGestureText="0"/>
-                <MenuItem Header="Zoom _in on focus"
+                <MenuItem Header="Zoom _in on playhead"
                           Command="{Binding ZoomInOnFocusCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                           InputGestureText="2"/>
-                <MenuItem Header="Zoom _out on focus"
+                <MenuItem Header="Zoom _out on playhead"
                           Command="{Binding ZoomOutOnFocusCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                           InputGestureText="3"/>
             </MenuItem>
@@ -619,7 +619,7 @@
                                 IsHitTestVisible="False"
                                 Cursor="Hand"
                                 Command="{Binding PlayPauseCommand}"
-                                ToolTip="Play / Pause (P)"
+                                ToolTip="Play / Pause (Space)"
                                 Background="Transparent"
                                 BorderThickness="0"
                                 Focusable="False">
@@ -658,6 +658,39 @@
             <Border Grid.Row="0" Grid.Column="2" Background="#333337" Margin="8,0,0,0" Padding="12">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
+                        <StackPanel Margin="0,0,0,16"
+                                    Visibility="{Binding HasSelectionPreview, Converter={StaticResource BoolToVis}}">
+                            <Button Click="SelectionPreviewLeft_Click"
+                                    ToolTip="Seek to this boundary"
+                                    Background="#2A2A2E"
+                                    BorderBrush="#555"
+                                    BorderThickness="1"
+                                    Padding="0"
+                                    Cursor="Hand"
+                                    Focusable="False"
+                                    Margin="0,0,0,8"
+                                    HorizontalContentAlignment="Stretch">
+                                <Image Source="{Binding SelectionPreviewLeftImage}"
+                                       Stretch="Uniform"
+                                       MinHeight="96"
+                                       Margin="2"/>
+                            </Button>
+                            <Button Click="SelectionPreviewRight_Click"
+                                    ToolTip="Seek to this boundary"
+                                    Background="#2A2A2E"
+                                    BorderBrush="#555"
+                                    BorderThickness="1"
+                                    Padding="0"
+                                    Cursor="Hand"
+                                    Focusable="False"
+                                    HorizontalContentAlignment="Stretch">
+                                <Image Source="{Binding SelectionPreviewRightImage}"
+                                       Stretch="Uniform"
+                                       MinHeight="96"
+                                       Margin="2"/>
+                            </Button>
+                        </StackPanel>
+
                         <TextBlock Text="Start fade from black (s)" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
                         <TextBox x:Name="StartFadeTextBox"
                                  Text="{Binding FadeFromBlackSeconds, UpdateSourceTrigger=LostFocus}"
@@ -680,7 +713,8 @@
                             <TextBlock Text="Crossfade (s)" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
                             <TextBlock Foreground="#AAA" TextWrapping="Wrap" Margin="0,0,0,8"
                                        Text="0 = hard cut."/>
-                            <TextBox Text="{Binding SelectedCrossfadeSeconds, UpdateSourceTrigger=LostFocus}"
+                            <TextBox x:Name="CrossfadeTextBox"
+                                     Text="{Binding SelectedCrossfadeSeconds, UpdateSourceTrigger=LostFocus}"
                                      Margin="0,0,0,4"
                                      KeyDown="DurationTextBox_KeyDown"
                                      LostFocus="SidebarDurationTextBox_LostFocus"/>
@@ -718,21 +752,21 @@
                 </StackPanel>
                 <StackPanel Orientation="Horizontal"
                             Visibility="{Binding ShowEditChrome, Converter={StaticResource BoolToVis}}">
-                    <Button Content="Delete Section"
-                            Command="{Binding DeleteSectionCommand}"
-                            ToolTip="{Binding DeleteSectionToolTip}"
+                    <Button Content="Drop Section"
+                            Command="{Binding DropSectionCommand}"
+                            ToolTip="{Binding DropSectionToolTip}"
                             Style="{StaticResource ToolbarButtonRed}" Margin="0,0,8,0"/>
                     <Button Content="Restore Section"
                             Command="{Binding RestoreSectionCommand}"
                             ToolTip="{Binding RestoreSectionToolTip}"
                             Style="{StaticResource ToolbarButtonRed}" Margin="0,0,8,0"/>
-                    <Button Content="Delete Section from Start"
-                            Command="{Binding DeleteSectionFromStartCommand}"
-                            ToolTip="{Binding DeleteSectionFromStartToolTip}"
+                    <Button Content="Drop Section from Start"
+                            Command="{Binding DropSectionFromStartCommand}"
+                            ToolTip="{Binding DropSectionFromStartToolTip}"
                             Style="{StaticResource ToolbarButtonRed}" Margin="0,0,8,0"/>
-                    <Button Content="Delete Section to End"
-                            Command="{Binding DeleteSectionToEndCommand}"
-                            ToolTip="{Binding DeleteSectionToEndToolTip}"
+                    <Button Content="Drop Section to End"
+                            Command="{Binding DropSectionToEndCommand}"
+                            ToolTip="{Binding DropSectionToEndToolTip}"
                             Style="{StaticResource ToolbarButtonRed}" Margin="0,0,8,0"/>
                     <Button Content="Restore Section from Start"
                             Command="{Binding RestoreSectionFromStartCommand}"
