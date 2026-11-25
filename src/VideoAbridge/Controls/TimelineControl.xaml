@@ -2,22 +2,26 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              MinHeight="160"
-             Background="#1E1E1E"
+             Background="#252526"
              Focusable="True"
              FocusVisualStyle="{x:Null}">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
     </UserControl.Resources>
     <Grid>
-        <!-- Overlay scrollbar: showing/hiding it must not change viewport size or zoom. -->
+        <!-- Overlay scrollbar: showing/hiding it must not change viewport size or zoom.
+             Canvas stays top-aligned at fixed height so surplus pane height is only below
+             (scrollbar band), matching the timeline background. -->
         <ScrollViewer x:Name="Scroller"
                       Style="{StaticResource OverlayHorizontalScrollViewer}"
+                      Background="#252526"
                       HorizontalScrollBarVisibility="Auto"
                       VerticalScrollBarVisibility="Disabled"
                       PreviewMouseWheel="OnPreviewMouseWheel">
             <Canvas x:Name="RootCanvas"
                     Height="160"
                     HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
                     Background="#252526"
                     MouseLeftButtonDown="OnCanvasMouseLeftButtonDown"
                     MouseMove="OnCanvasMouseMove"

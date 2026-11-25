@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Timeline pane no longer shows darker bands above and below the track: surplus height is only under the timeline (scrollbar band) and matches the timeline color.
 - Edit sidebar selection frames no longer flicker when the selection changes: previous frames stay until the new ones are ready, then replace in one update.
 
 ## [2026.11.9] - 2026-11-24
