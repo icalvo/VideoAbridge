@@ -1,8 +1,8 @@
 namespace VideoAbridge.Core.Editing;
 
 /// <summary>
-/// Edit-mode playhead-driven timeline focus: derive the S/Shift+S target from the
-/// playhead, and compute prev/next marker or deleted-run center jump targets.
+/// Edit-mode playhead-driven timeline focus: derive the S (extend) / Shift+S (replace)
+/// target from the playhead, and compute prev/next marker or deleted-run center jump targets.
 /// </summary>
 public static class TimelineFocusNavigation
 {

@@ -7,9 +7,14 @@ alwaysApply: true
 
 Canonical docs: README → **Releases**, workflow `.github/workflows/release.yml`.
 
-1. While working, append bullets under `## [Unreleased]` in `CHANGELOG.md` **only when the change affects the user** (behavior, UI, packaging, docs they read, load/save compatibility, etc.). Skip the changelog for internal refactors, renames, test-only work, agent rules, and other non-user-visible edits.
-2. To publish: rename that section to `## [x.y.z] - YYYY-MM-DD`, update compare links at the bottom if needed, and tell the user to push to `main`.
-3. CI reads the latest **versioned** changelog entry; if GitHub Release `v`+version does not exist, it tests, publishes win-x64 zip, and creates the Release. Normal releases do **not** push Chocolatey.
-4. To publish Chocolatey for an existing Release: `workflow_dispatch` with `chocolatey_only_version` (`CHOCOLATEY_API_KEY` secret; sources under `packaging/chocolatey/`).
+1. While working, update bullets under `## [Unreleased]` in `CHANGELOG.md` **only when the change affects the user** (behavior, UI, packaging, docs they read, load/save compatibility, etc.). Skip the changelog for internal refactors, renames, test-only work, agent rules, and other non-user-visible edits.
+2. **Unreleased is relative to the latest versioned release**, not a diary of every edit in the working tree:
+   - Describe the net user-facing delta vs that release. Prefer one clear bullet per feature/behavior.
+   - If you add something and later refine it before release (polish, bugfixes that only matter for the new work, wording tweaks), **edit the existing Unreleased bullet** so it describes the final behavior. Do **not** append a separate Fixed/Changed for that refinement.
+   - Use **Fixed** / **Changed** only for issues or behavior that already shipped in the latest versioned release (or for Unreleased items that are themselves corrections to already-documented Unreleased behavior when merging would be misleading).
+   - Drop or rewrite bullets that no longer apply after a redesign in the same Unreleased cycle.
+3. To publish: rename that section to `## [x.y.z] - YYYY-MM-DD`, update compare links at the bottom if needed, and tell the user to push to `main`.
+4. CI reads the latest **versioned** changelog entry; if GitHub Release `v`+version does not exist, it tests, publishes win-x64 zip, and creates the Release. Normal releases do **not** push Chocolatey.
+5. To publish Chocolatey for an existing Release: `workflow_dispatch` with `chocolatey_only_version` (`CHOCOLATEY_API_KEY` secret; sources under `packaging/chocolatey/`).
 
 Do **not** invent alternate triggers (commit labels, manual tags) unless the docs change. Do **not** commit or push the release yourself (see no-git-commit-push rule).

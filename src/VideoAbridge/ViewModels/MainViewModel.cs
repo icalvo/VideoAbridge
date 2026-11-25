@@ -57,6 +57,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     private bool _inCrossfade;
     private bool _committingVersionRename;
     private double _frameRate = 30;
+    private PlayheadMoveMode _editMoveMode = PlayheadMoveMode.Marker;
 
     [ObservableProperty] private string? _videoPath;
     [ObservableProperty] private Timeline? _timeline;
@@ -81,10 +82,21 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool _hasSelectionPreview;
     [ObservableProperty] private ImageSource? _selectionPreviewLeftImage;
     [ObservableProperty] private ImageSource? _selectionPreviewRightImage;
+    [ObservableProperty] private PlayheadMoveMode _playheadMoveMode = PlayheadMoveMode.Marker;
 
     public string PreviewModeToggleLabel => IsPreviewMode ? "Edit" : "Preview";
 
     public bool ShowEditChrome => !IsPreviewMode;
+
+    public string PlayheadMoveModeLabel => PlayheadMoveMode switch
+    {
+        PlayheadMoveMode.Marker => "Move: Marker",
+        PlayheadMoveMode.Cut => "Move: Cut",
+        PlayheadMoveMode.Frame => "Move: 1 frame",
+        PlayheadMoveMode.Second => "Move: 1 second",
+        PlayheadMoveMode.TenSeconds => "Move: 10 seconds",
+        _ => "Move:",
+    };
 
     public bool HasSelectedJoin =>
         SelectedDeletedRunId is { } id
@@ -273,12 +285,16 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         _ = RefreshSelectionPreviewAsync();
     }
 
+    partial void OnPlayheadMoveModeChanged(PlayheadMoveMode value) =>
+        OnPropertyChanged(nameof(PlayheadMoveModeLabel));
+
     partial void OnIsPreviewModeChanged(bool value)
     {
         OnPropertyChanged(nameof(PreviewModeToggleLabel));
         OnPropertyChanged(nameof(ShowEditChrome));
         OnPropertyChanged(nameof(DisplayPlayhead));
         TogglePreviewModeCommand.NotifyCanExecuteChanged();
+        SyncPlayheadMoveModeForPreview(enteringPreview: value);
         _ = RefreshSelectionPreviewAsync();
 
         if (_restoringUiFromCache)
@@ -693,32 +709,6 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         DeleteVersion(_versionSet.ActiveVersionId);
     }
 
-    /// <summary>Nudge the playhead by <paramref name="delta"/> on the active timeline clock.</summary>
-    public void NudgePlayhead(TimeSpan delta)
-    {
-        if (!CanNudgePlayhead())
-            return;
-
-        if (IsPreviewMode)
-        {
-            SeekAbridgedPlayhead(AbridgedPlayhead + delta);
-            return;
-        }
-
-        if (Timeline is null)
-            return;
-
-        var next = Playhead + delta;
-        if (next < TimeSpan.Zero)
-            next = TimeSpan.Zero;
-        else if (next > Timeline.Duration)
-            next = Timeline.Duration;
-
-        SeekPlayhead(next);
-    }
-
-    public bool CanNudgePlayhead() => HasVideoLoaded && !IsPlaying;
-
     public TimeSpan FrameStep =>
         _frameRate > 1e-6
             ? TimeSpan.FromSeconds(1.0 / _frameRate)
@@ -909,6 +899,216 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             SeekPlayheadToMarker(markerId);
         else
             SyncFocusFromPlayhead();
+    }
+
+    /// <summary>Select sticky Left/Right mode (keys 5–9). Marker is ignored in Preview.</summary>
+    public void SetPlayheadMoveMode(PlayheadMoveMode mode)
+    {
+        if (!HasVideoLoaded)
+            return;
+        if (IsPreviewMode && mode == PlayheadMoveMode.Marker)
+            return;
+
+        PlayheadMoveMode = mode;
+        if (!IsPreviewMode)
+            _editMoveMode = mode;
+    }
+
+    /// <summary>Seek-and-pause by the sticky move mode. Returns true if the playhead moved.</summary>
+    public bool MovePlayheadByMode(int direction)
+    {
+        if (!HasVideoLoaded || direction == 0)
+            return false;
+
+        return PlayheadMoveMode switch
+        {
+            PlayheadMoveMode.Marker => JumpPlayheadToMarker(direction),
+            PlayheadMoveMode.Cut => IsPreviewMode
+                ? JumpAbridgedPlayheadToOverlay(direction)
+                : JumpPlayheadToCutCenter(direction),
+            PlayheadMoveMode.Frame => NudgePlayheadByMode(direction, FrameStep),
+            PlayheadMoveMode.Second => NudgePlayheadByMode(direction, TimeSpan.FromSeconds(1)),
+            PlayheadMoveMode.TenSeconds => NudgePlayheadByMode(direction, TimeSpan.FromSeconds(10)),
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// Nudge selected manual markers by the sticky move mode (Ctrl+Left/Right).
+    /// Marker and Cut modes are disabled. Cut selection moves its delimiting manual markers.
+    /// On failure, shows a warning with the reason.
+    /// </summary>
+    public bool MoveSelectionByMode(int direction)
+    {
+        if (direction == 0)
+            return false;
+
+        if (GetMoveSelectionByModeBlockReason(direction, out var targets, out var delta) is { } reason)
+        {
+            ReportError(reason);
+            return false;
+        }
+
+        PauseIfPlaying();
+
+        // Move with the nudge so selected neighbors do not collide mid-chain.
+        var ordered = direction > 0
+            ? targets.OrderByDescending(m => m.Time)
+            : targets.OrderBy(m => m.Time);
+
+        Result<Timeline> result = Timeline!;
+        foreach (var marker in ordered)
+        {
+            var id = marker.Id;
+            var newTime = marker.Time + delta;
+            result = result.Bind(t => t.MoveMarker(id, newTime));
+        }
+
+        var moved = false;
+        result.Match(
+            timeline =>
+            {
+                if (ReferenceEquals(timeline, Timeline))
+                {
+                    ReportError("Selection could not be moved further.");
+                    return;
+                }
+
+                Apply(result);
+                moved = true;
+            },
+            error => ReportError(error.Message));
+        return moved;
+    }
+
+    private string? GetMoveSelectionByModeBlockReason(
+        int direction,
+        out List<Marker> targets,
+        out TimeSpan delta)
+    {
+        targets = [];
+        delta = default;
+
+        if (Timeline is null)
+            return "Open a video to begin.";
+        if (IsPreviewMode)
+            return "Switch to Edit to nudge the selection.";
+        if (PlayheadMoveMode is PlayheadMoveMode.Marker or PlayheadMoveMode.Cut)
+            return "Selection nudge is disabled in Marker and Cut move modes. Press 7–9 for frame or time.";
+
+        if (GetManualMarkersForSelectionMove(out targets) is { } selectionReason)
+            return selectionReason;
+
+        delta = PlayheadMoveMode switch
+        {
+            PlayheadMoveMode.Frame => direction < 0 ? -FrameStep : FrameStep,
+            PlayheadMoveMode.Second => TimeSpan.FromSeconds(direction < 0 ? -1 : 1),
+            PlayheadMoveMode.TenSeconds => TimeSpan.FromSeconds(direction < 0 ? -10 : 10),
+            _ => TimeSpan.Zero,
+        };
+
+        if (delta == TimeSpan.Zero)
+            return "Nothing to move for the current move mode.";
+
+        return null;
+    }
+
+    /// <summary>Null when <paramref name="targets"/> has at least one movable manual marker.</summary>
+    private string? GetManualMarkersForSelectionMove(out List<Marker> targets)
+    {
+        targets = [];
+        if (Timeline is null)
+            return "Open a video to begin.";
+
+        if (SelectedDeletedRunId is { } runId)
+        {
+            if (!Timeline.TryGetDeletedRunBoundaries(runId, out var leftId, out var rightId))
+                return "Could not resolve the selected cut’s boundaries.";
+
+            foreach (var id in new[] { leftId, rightId })
+            {
+                if (id == MarkerId.StartBound || id == MarkerId.EndBound)
+                    continue;
+                var marker = Timeline.Markers.FirstOrDefault(m => m.Id == id);
+                if (marker is not null && marker.Source == MarkerSource.User)
+                    targets.Add(marker);
+            }
+
+            return targets.Count == 0
+                ? "This cut has no movable manual boundary markers."
+                : null;
+        }
+
+        if (SelectedMarkerIds.Count == 0)
+            return "Select a manual marker or a cut to nudge.";
+
+        var sawSceneOnly = false;
+        foreach (var id in SelectedMarkerIds)
+        {
+            var marker = Timeline.Markers.FirstOrDefault(m => m.Id == id);
+            if (marker is null)
+                continue;
+            if (marker.Source == MarkerSource.User)
+                targets.Add(marker);
+            else
+                sawSceneOnly = true;
+        }
+
+        if (targets.Count > 0)
+            return null;
+
+        return sawSceneOnly
+            ? "Only manual markers can be nudged (scene-detect markers stay fixed)."
+            : "Select a manual marker or a cut to nudge.";
+    }
+
+    private void SyncPlayheadMoveModeForPreview(bool enteringPreview)
+    {
+        if (enteringPreview)
+        {
+            if (PlayheadMoveMode == PlayheadMoveMode.Marker)
+                PlayheadMoveMode = PlayheadMoveMode.Cut;
+            return;
+        }
+
+        PlayheadMoveMode = _editMoveMode;
+    }
+
+    private bool NudgePlayheadByMode(int direction, TimeSpan step)
+    {
+        PauseIfPlaying();
+
+        var delta = direction < 0 ? -step : step;
+        if (IsPreviewMode)
+        {
+            if (_previewMap is null)
+                return false;
+
+            var next = AbridgedPlayhead + delta;
+            if (next < TimeSpan.Zero)
+                next = TimeSpan.Zero;
+            else if (next > _previewMap.AbridgedDuration)
+                next = _previewMap.AbridgedDuration;
+            if (next == AbridgedPlayhead)
+                return false;
+
+            SeekAbridgedPlayhead(next);
+            return true;
+        }
+
+        if (Timeline is null)
+            return false;
+
+        var nextSource = Playhead + delta;
+        if (nextSource < TimeSpan.Zero)
+            nextSource = TimeSpan.Zero;
+        else if (nextSource > Timeline.Duration)
+            nextSource = Timeline.Duration;
+        if (nextSource == Playhead)
+            return false;
+
+        SeekPlayhead(nextSource);
+        return true;
     }
 
     /// <summary>Seek-and-pause to previous/next marker. Returns true if the playhead moved.</summary>
@@ -3094,12 +3294,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         _selectionPreviewLeftSeek = leftTime;
         _selectionPreviewRightSeek = rightTime;
 
-        await Application.Current.Dispatcher.InvokeAsync(() =>
-        {
-            HasSelectionPreview = true;
-            SelectionPreviewLeftImage = null;
-            SelectionPreviewRightImage = null;
-        }).Task.ConfigureAwait(false);
+        // Keep prior frames visible until both replacements are ready (no clear/flicker mid-move).
 
         try
         {
@@ -3124,6 +3319,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
                     return;
                 SelectionPreviewLeftImage = leftImage;
                 SelectionPreviewRightImage = rightImage;
+                HasSelectionPreview = true;
             }).Task.ConfigureAwait(false);
         }
         catch (OperationCanceledException)

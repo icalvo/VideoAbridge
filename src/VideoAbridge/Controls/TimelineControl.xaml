@@ -5,20 +5,34 @@
              Background="#1E1E1E"
              Focusable="True"
              FocusVisualStyle="{x:Null}">
-    <!-- Overlay scrollbar: showing/hiding it must not change viewport size or zoom. -->
-    <ScrollViewer x:Name="Scroller"
-                  Style="{StaticResource OverlayHorizontalScrollViewer}"
-                  HorizontalScrollBarVisibility="Auto"
-                  VerticalScrollBarVisibility="Disabled"
-                  PreviewMouseWheel="OnPreviewMouseWheel">
-        <Canvas x:Name="RootCanvas"
-                Height="160"
-                HorizontalAlignment="Left"
-                Background="#252526"
-                MouseLeftButtonDown="OnCanvasMouseLeftButtonDown"
-                MouseMove="OnCanvasMouseMove"
-                MouseLeftButtonUp="OnCanvasMouseLeftButtonUp"
-                MouseRightButtonDown="OnCanvasMouseRightButtonDown"
-                SizeChanged="OnCanvasSizeChanged"/>
-    </ScrollViewer>
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+    </UserControl.Resources>
+    <Grid>
+        <!-- Overlay scrollbar: showing/hiding it must not change viewport size or zoom. -->
+        <ScrollViewer x:Name="Scroller"
+                      Style="{StaticResource OverlayHorizontalScrollViewer}"
+                      HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Disabled"
+                      PreviewMouseWheel="OnPreviewMouseWheel">
+            <Canvas x:Name="RootCanvas"
+                    Height="160"
+                    HorizontalAlignment="Left"
+                    Background="#252526"
+                    MouseLeftButtonDown="OnCanvasMouseLeftButtonDown"
+                    MouseMove="OnCanvasMouseMove"
+                    MouseLeftButtonUp="OnCanvasMouseLeftButtonUp"
+                    MouseRightButtonDown="OnCanvasMouseRightButtonDown"
+                    SizeChanged="OnCanvasSizeChanged"/>
+        </ScrollViewer>
+        <!-- Viewport-fixed; sits in the free band above the overlay scrollbar. -->
+        <TextBlock Text="{Binding PlayheadMoveModeLabel}"
+                   Foreground="#AAAAAA"
+                   FontSize="11"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Bottom"
+                   Margin="0,0,0,14"
+                   IsHitTestVisible="False"
+                   Visibility="{Binding HasVideoLoaded, Converter={StaticResource BoolToVis}}"/>
+    </Grid>
 </UserControl>

@@ -130,6 +130,38 @@ public class TimelineTests
     }
 
     [Fact]
+    public void TryGetDeletedRunBoundariesReturnsMarkerIds()
+    {
+        var timeline = CreateWithMarkers(10, 30, 50);
+        var leftId = timeline.Markers[0].Id;
+        var rightId = timeline.Markers[1].Id;
+        timeline = timeline.DeleteBetween(leftId, rightId).RequireOk();
+        var runId = timeline.GetDeletedRuns().Single().Id;
+
+        timeline.TryGetDeletedRunBoundaries(runId, out var left, out var right).Should().BeTrue();
+        left.Should().Be(leftId);
+        right.Should().Be(rightId);
+    }
+
+    [Fact]
+    public void MoveMarkerChainSlidesDeletedRunWhenBothBoundsMove()
+    {
+        var timeline = CreateWithMarkers(10, 30, 60);
+        var leftId = timeline.Markers[0].Id;
+        var rightId = timeline.Markers[1].Id;
+        timeline = timeline.DeleteBetween(leftId, rightId).RequireOk();
+
+        var delta = TimeSpan.FromSeconds(5);
+        var moved = timeline
+            .MoveMarker(rightId, TimeSpan.FromSeconds(30) + delta)
+            .Bind(t => t.MoveMarker(leftId, TimeSpan.FromSeconds(10) + delta))
+            .RequireOk();
+
+        moved.GetDeletedRuns().Should().ContainSingle()
+            .Which.Range.Should().Be(new TimeRange(TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(35)));
+    }
+
+    [Fact]
     public void MoveMarkerFailsWhenCrossingNeighbor()
     {
         var timeline = CreateWithMarkers(10, 30, 50);
@@ -155,6 +187,19 @@ public class TimelineTests
         var timeline = CreateWithMarkers(10);
         var error = timeline.MoveMarker(timeline.Markers[0].Id, TimeSpan.Zero).RequireError();
         error.Code.Should().Be("MarkerOutOfRange");
+    }
+
+    [Fact]
+    public void MoveMarkerAllowsSubEpsilonNudge()
+    {
+        // 1 frame at 30fps is ~33ms, under MarkerEpsilon (40ms); must still apply.
+        var timeline = CreateWithMarkers(10, 30);
+        var id = timeline.Markers[0].Id;
+        var frame = TimeSpan.FromSeconds(1.0 / 30.0);
+
+        var moved = timeline.MoveMarker(id, TimeSpan.FromSeconds(10) + frame).RequireOk();
+
+        moved.Markers[0].Time.Should().Be(TimeSpan.FromSeconds(10) + frame);
     }
 
     [Fact]

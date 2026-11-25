@@ -54,8 +54,9 @@ Open **Help → Keyboard shortcuts** (or press `?`) for a categorized list. Shor
 | Ctrl+S                | Export                                    |
 | Space / P             | Play / Pause                              |
 | Home                  | Go to Beginning                           |
-| 7 / 8 / 9             | Nudge playhead +1 frame / +1s / +10s      |
-| Shift+7 / 8 / 9       | Nudge playhead −1 frame / −1s / −10s      |
+| 5 / 6 / 7 / 8 / 9     | Move mode: Marker / Cut / 1 frame / 1s / 10s |
+| Left / Right          | Move playhead by the sticky mode          |
+| Ctrl+Left / Right     | Nudge selection by move mode (not Marker/Cut) |
 | Ctrl+Z / Ctrl+Y       | Undo / Redo                               |
 | M                     | Add Marker                                |
 | Delete                | Delete Marker / Drop Section              |
@@ -64,9 +65,7 @@ Open **Help → Keyboard shortcuts** (or press `?`) for a categorized list. Shor
 | Ctrl+Shift+Home / End | Restore Section from Start / to End       |
 | Ctrl+D                | Detect Scenes                             |
 | E                     | Toggle Edit / Preview                     |
-| Left / Right          | Edit: previous / next marker; Preview: 2s before cut / fade |
-| Shift+Left / Right    | Jump playhead to previous / next cut center (Edit)|
-| S / Shift+S           | Click / Shift-click item under playhead (Edit)|
+| S / Shift+S           | Shift-click / Click item under playhead (Edit)|
 | Enter                 | Edit crossfade (selected cut, Edit)       |
 | Shift+Enter           | Edit start fade (Edit)                    |
 | 2 / 3                 | Zoom in / out on playhead                 |

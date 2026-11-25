@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Ctrl+Left/Right nudges the selection by the sticky move mode (1 frame / 1s / 10s): selected manual markers, or a cut’s delimiting manual markers. Disabled for Marker and Cut modes; warns with the reason when the nudge is blocked.
+
+### Changed
+
+- Playhead movement uses sticky modes: `5`–`9` select Marker / Cut / 1 frame / 1s / 10s; Left/Right move (seek-and-pause). Shift+7/8/9 and Shift+Left/Right removed; mode label overlays the timeline pane (`Move: Marker`, etc.).
+- Esc in sidebar duration fields (and version rename) discards the edit and returns focus to the timeline.
+- Edit timeline: `S` is Shift-click (extend selection) under the playhead; `Shift+S` is click (replace selection).
+
+### Fixed
+
+- Edit sidebar selection frames no longer flicker when the selection changes: previous frames stay until the new ones are ready, then replace in one update.
+
 ## [2026.11.9] - 2026-11-24
 
 ### Added

@@ -438,7 +438,7 @@ public partial class MainWindow : Window, IDisposable
         else if (e.Key == Key.Escape)
         {
             tab.CancelEdit();
-            Keyboard.ClearFocus();
+            FocusTimeline();
             e.Handled = true;
         }
     }
@@ -523,12 +523,24 @@ public partial class MainWindow : Window, IDisposable
 
     private void DurationTextBox_KeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key != Key.Enter || sender is not TextBox box)
+        if (sender is not TextBox box)
             return;
 
-        box.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
-        FocusTimeline();
-        e.Handled = true;
+        if (e.Key == Key.Enter)
+        {
+            box.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+            FocusTimeline();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Escape)
+        {
+            // Discard edits before focus leaves (LostFocus would otherwise commit).
+            box.GetBindingExpression(TextBox.TextProperty)?.UpdateTarget();
+            FocusTimeline();
+            e.Handled = true;
+        }
     }
 
     private void SidebarDurationTextBox_LostFocus(object sender, RoutedEventArgs e)
@@ -554,15 +566,12 @@ public partial class MainWindow : Window, IDisposable
 
         var mods = Keyboard.Modifiers;
 
-        if (Timeline.IsKeyboardFocusWithin)
+        if (!_viewModel.IsPreviewMode
+            && Timeline.IsKeyboardFocusWithin
+            && TryHandleTimelineFocusKeys(mods, e.Key))
         {
-            if (_viewModel.IsPreviewMode
-                ? TryHandlePreviewTimelineKeys(mods, e.Key)
-                : TryHandleTimelineFocusKeys(mods, e.Key))
-            {
-                e.Handled = true;
-                return;
-            }
+            e.Handled = true;
+            return;
         }
 
         var handled = mods switch
@@ -593,18 +602,18 @@ public partial class MainWindow : Window, IDisposable
                 TryExecute(_viewModel.CreateVersionCommand),
             ModifierKeys.Control when e.Key is Key.M =>
                 TryExecute(_viewModel.MoveMarkerToPlayheadCommand),
+            // Always consume: otherwise ScrollViewer treats Ctrl+Left/Right as horizontal scroll
+            // when the nudge no-ops (Marker mode, empty selection, blocked move, etc.).
+            ModifierKeys.Control when e.Key is Key.Left =>
+                TryMoveSelectionByMode(-1),
+            ModifierKeys.Control when e.Key is Key.Right =>
+                TryMoveSelectionByMode(1),
             ModifierKeys.Control when e.Key is Key.Z =>
                 TryExecute(_viewModel.UndoCommand),
             ModifierKeys.Control when e.Key is Key.Y =>
                 TryExecute(_viewModel.RedoCommand),
             ModifierKeys.Shift when e.Key is Key.Delete =>
                 TryExecute(_viewModel.RestoreSectionCommand),
-            ModifierKeys.Shift when e.Key is Key.D7 or Key.NumPad7 =>
-                TryNudgePlayhead(-_viewModel.FrameStep),
-            ModifierKeys.Shift when e.Key is Key.D8 or Key.NumPad8 =>
-                TryNudgePlayhead(TimeSpan.FromSeconds(-1)),
-            ModifierKeys.Shift when e.Key is Key.D9 or Key.NumPad9 =>
-                TryNudgePlayhead(TimeSpan.FromSeconds(-10)),
             ModifierKeys.None when e.Key is Key.P or Key.Space =>
                 TryExecute(_viewModel.PlayPauseCommand),
             ModifierKeys.None when e.Key is Key.Home =>
@@ -625,12 +634,20 @@ public partial class MainWindow : Window, IDisposable
                 TryExecute(ZoomInOnFocusCommand),
             ModifierKeys.None when e.Key is Key.D3 or Key.NumPad3 =>
                 TryExecute(ZoomOutOnFocusCommand),
+            ModifierKeys.None when e.Key is Key.D5 or Key.NumPad5 =>
+                TrySetPlayheadMoveMode(PlayheadMoveMode.Marker),
+            ModifierKeys.None when e.Key is Key.D6 or Key.NumPad6 =>
+                TrySetPlayheadMoveMode(PlayheadMoveMode.Cut),
             ModifierKeys.None when e.Key is Key.D7 or Key.NumPad7 =>
-                TryNudgePlayhead(_viewModel.FrameStep),
+                TrySetPlayheadMoveMode(PlayheadMoveMode.Frame),
             ModifierKeys.None when e.Key is Key.D8 or Key.NumPad8 =>
-                TryNudgePlayhead(TimeSpan.FromSeconds(1)),
+                TrySetPlayheadMoveMode(PlayheadMoveMode.Second),
             ModifierKeys.None when e.Key is Key.D9 or Key.NumPad9 =>
-                TryNudgePlayhead(TimeSpan.FromSeconds(10)),
+                TrySetPlayheadMoveMode(PlayheadMoveMode.TenSeconds),
+            ModifierKeys.None when e.Key is Key.Left =>
+                TryMovePlayheadByMode(-1),
+            ModifierKeys.None when e.Key is Key.Right =>
+                TryMovePlayheadByMode(1),
             ModifierKeys.None when e.Key is Key.F2 =>
                 TryExecute(_viewModel.RenameVersionCommand),
             // "?" is Shift+/ (Oem2 / OemQuestion on US layouts).
@@ -648,49 +665,13 @@ public partial class MainWindow : Window, IDisposable
         base.OnPreviewKeyDown(e);
     }
 
-    private bool TryHandlePreviewTimelineKeys(ModifierKeys mods, Key key)
-    {
-        if (mods != ModifierKeys.None)
-            return false;
-
-        if (key is Key.Left)
-        {
-            if (_viewModel.JumpAbridgedPlayheadToOverlay(-1))
-                Timeline.EnsurePlayheadVisible();
-            return true;
-        }
-
-        if (key is Key.Right)
-        {
-            if (_viewModel.JumpAbridgedPlayheadToOverlay(1))
-                Timeline.EnsurePlayheadVisible();
-            return true;
-        }
-
-        return false;
-    }
-
     private bool TryHandleTimelineFocusKeys(ModifierKeys mods, Key key)
     {
         if (mods == ModifierKeys.None)
         {
-            if (key is Key.Left)
-            {
-                if (_viewModel.JumpPlayheadToMarker(-1))
-                    Timeline.EnsurePlayheadVisible();
-                return true;
-            }
-
-            if (key is Key.Right)
-            {
-                if (_viewModel.JumpPlayheadToMarker(1))
-                    Timeline.EnsurePlayheadVisible();
-                return true;
-            }
-
             if (key is Key.S)
             {
-                _viewModel.ActivateTimelineFocus(extendSelection: false);
+                _viewModel.ActivateTimelineFocus(extendSelection: true);
                 return true;
             }
 
@@ -702,23 +683,9 @@ public partial class MainWindow : Window, IDisposable
         }
         else if (mods == ModifierKeys.Shift)
         {
-            if (key is Key.Left)
-            {
-                if (_viewModel.JumpPlayheadToCutCenter(-1))
-                    Timeline.EnsurePlayheadVisible();
-                return true;
-            }
-
-            if (key is Key.Right)
-            {
-                if (_viewModel.JumpPlayheadToCutCenter(1))
-                    Timeline.EnsurePlayheadVisible();
-                return true;
-            }
-
             if (key is Key.S)
             {
-                _viewModel.ActivateTimelineFocus(extendSelection: true);
+                _viewModel.ActivateTimelineFocus(extendSelection: false);
                 return true;
             }
 
@@ -740,12 +707,25 @@ public partial class MainWindow : Window, IDisposable
         return true;
     }
 
-    private bool TryNudgePlayhead(TimeSpan delta)
+    private bool TrySetPlayheadMoveMode(PlayheadMoveMode mode)
     {
-        if (!_viewModel.CanNudgePlayhead())
+        if (!_viewModel.HasVideoLoaded)
             return false;
-        _viewModel.NudgePlayhead(delta);
+        _viewModel.SetPlayheadMoveMode(mode);
+        return true;
+    }
+
+    private bool TryMovePlayheadByMode(int direction)
+    {
+        if (!_viewModel.MovePlayheadByMode(direction))
+            return false;
         Timeline.EnsurePlayheadVisible();
+        return true;
+    }
+
+    private bool TryMoveSelectionByMode(int direction)
+    {
+        _viewModel.MoveSelectionByMode(direction);
         return true;
     }
 

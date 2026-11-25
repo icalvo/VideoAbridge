@@ -170,7 +170,9 @@ public sealed class Timeline
             return new DomainError("MarkerNotFound", "Marker was not found.");
 
         var marker = Markers[index];
-        if (AbsDiff(marker.Time, newTime) <= MarkerEpsilon)
+        // Exact match only — MarkerEpsilon must not swallow intentional 1-frame nudges
+        // (often ~16–40ms, ≤ epsilon at common frame rates).
+        if (marker.Time == newTime)
             return this;
 
         if (newTime <= TimeSpan.Zero || newTime >= Duration)
@@ -374,11 +376,32 @@ public sealed class Timeline
         if (run is null)
             return new DomainError("DeletedRunNotFound", "Deleted run was not found.");
 
-        if (!TryGetBoundaryIdAt(run.Range.Start, out var left)
-            || !TryGetBoundaryIdAt(run.Range.End, out var right))
+        if (!TryGetDeletedRunBoundaries(deletedRunId, out var left, out var right))
             return new DomainError("BoundaryNotFound", "Could not resolve deleted run boundaries.");
 
         return RestoreBetween(left, right);
+    }
+
+    /// <summary>
+    /// Boundary marker ids of a deleted run (may be <see cref="MarkerId.StartBound"/> /
+    /// <see cref="MarkerId.EndBound"/> for edge runs).
+    /// </summary>
+    public bool TryGetDeletedRunBoundaries(
+        DeletedRunId deletedRunId,
+        out MarkerId leftId,
+        out MarkerId rightId)
+    {
+        var run = GetDeletedRuns().FirstOrDefault(r => r.Id == deletedRunId);
+        if (run is null
+            || !TryGetBoundaryIdAt(run.Range.Start, out leftId)
+            || !TryGetBoundaryIdAt(run.Range.End, out rightId))
+        {
+            leftId = default;
+            rightId = default;
+            return false;
+        }
+
+        return true;
     }
 
     public Result<Timeline> SetJoinHardCut(DeletedRunId deletedRunId)
