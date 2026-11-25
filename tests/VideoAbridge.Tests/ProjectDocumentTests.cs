@@ -40,4 +40,42 @@ public class ProjectDocumentTests
         loaded.Timeline.Settings.FadeFromBlackSeconds.Should().Be(1.5);
         loaded.Timeline.Settings.FadeToBlackSeconds.Should().Be(2.0);
     }
+
+    [Fact]
+    public void RoundTripsMarkerLabels()
+    {
+        var timeline = Timeline.Create(TimeSpan.FromSeconds(100)).RequireOk();
+        timeline = timeline.AddMarker(TimeSpan.FromSeconds(10), MarkerSource.User).RequireOk();
+        timeline = timeline.AddMarker(TimeSpan.FromSeconds(20), MarkerSource.User).RequireOk();
+        timeline = timeline.SetMarkerLabel(timeline.Markers[0].Id, "Intro").RequireOk();
+
+        var doc = ProjectDocument.FromTimeline(@"C:\video.mp4", timeline);
+        var json = ProjectDocument.Serialize(doc);
+        json.Should().Contain("\"label\": \"Intro\"");
+        json.Should().NotContain("\"label\": null");
+
+        var loaded = ProjectDocument.Deserialize(json).RequireOk().ToTimeline().RequireOk();
+        loaded.Timeline.Markers[0].Label.Should().Be("Intro");
+        loaded.Timeline.Markers[1].Label.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void MissingMarkerLabelDeserializesAsEmpty()
+    {
+        const string json =
+            """
+            {
+              "videoPath": "C:\\video.mp4",
+              "durationSeconds": 100,
+              "markers": [
+                { "id": "11111111-1111-1111-1111-111111111111", "timeSeconds": 10, "source": "User" }
+              ],
+              "segmentDeleted": [ false, false ]
+            }
+            """;
+
+        var loaded = ProjectDocument.Deserialize(json).RequireOk().ToTimeline().RequireOk();
+        loaded.Timeline.Markers.Should().ContainSingle()
+            .Which.Label.Should().BeEmpty();
+    }
 }

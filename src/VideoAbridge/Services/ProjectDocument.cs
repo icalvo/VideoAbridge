@@ -32,7 +32,8 @@ internal sealed class ProjectDocument
                 {
                     Id = m.Id.Value,
                     TimeSeconds = m.Time.TotalSeconds,
-                    Source = m.Source.ToString()
+                    Source = m.Source.ToString(),
+                    Label = string.IsNullOrEmpty(m.Label) ? null : m.Label
                 })
             ],
             SegmentDeleted = [.. timeline.Segments.Select(s => s.IsDeleted)],
@@ -72,7 +73,8 @@ internal sealed class ProjectDocument
                     return new Marker(
                         marker.Id == Guid.Empty ? MarkerId.New() : MarkerId.From(marker.Id),
                         TimeSpan.FromSeconds(marker.TimeSeconds),
-                        source);
+                        source,
+                        string.IsNullOrWhiteSpace(marker.Label) ? "" : marker.Label.Trim());
                 })
         ];
 

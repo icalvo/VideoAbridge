@@ -10,8 +10,8 @@
     </UserControl.Resources>
     <Grid>
         <!-- Overlay scrollbar: showing/hiding it must not change viewport size or zoom.
-             Canvas stays top-aligned at fixed height so surplus pane height is only below
-             (scrollbar band), matching the timeline background. -->
+             Canvas height tracks the viewport (min 160); top band is for marker labels,
+             surplus below the track hosts the overlay scrollbar (same background). -->
         <ScrollViewer x:Name="Scroller"
                       Style="{StaticResource OverlayHorizontalScrollViewer}"
                       Background="#252526"
@@ -19,7 +19,7 @@
                       VerticalScrollBarVisibility="Disabled"
                       PreviewMouseWheel="OnPreviewMouseWheel">
             <Canvas x:Name="RootCanvas"
-                    Height="160"
+                    MinHeight="160"
                     HorizontalAlignment="Left"
                     VerticalAlignment="Top"
                     Background="#252526"

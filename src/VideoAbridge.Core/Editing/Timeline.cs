@@ -159,6 +159,28 @@ public sealed class Timeline
     }
 
     /// <summary>
+    /// Sets the display label on an existing marker. Null is treated as empty; whitespace is trimmed.
+    /// </summary>
+    public Result<Timeline> SetMarkerLabel(MarkerId markerId, string? label)
+    {
+        var index = Markers.FindIndex(m => m.Id == markerId);
+        if (index < 0)
+            return new DomainError("MarkerNotFound", "Marker was not found.");
+
+        var normalized = string.IsNullOrWhiteSpace(label) ? "" : label.Trim();
+        var marker = Markers[index];
+        if (marker.Label == normalized)
+            return this;
+
+        return new Timeline(
+            Duration,
+            Markers.SetItem(index, marker with { Label = normalized }),
+            Segments,
+            Joins,
+            Settings);
+    }
+
+    /// <summary>
     /// Moves an existing marker to <paramref name="newTime"/> without changing marker order.
     /// Fails when the time is out of range, too close to a neighbor/edge, would reorder markers,
     /// or would make an existing crossfade / edge fade exceed its cap.

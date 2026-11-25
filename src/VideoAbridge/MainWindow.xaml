@@ -718,8 +718,16 @@
                                      Margin="0,0,0,4"
                                      KeyDown="DurationTextBox_KeyDown"
                                      LostFocus="SidebarDurationTextBox_LostFocus"/>
-                            <TextBlock Foreground="#AAA"
+                            <TextBlock Foreground="#AAA" Margin="0,0,0,16"
                                        Text="{Binding SelectedCrossfadeCap, StringFormat=Max: {0:0.###}s}"/>
+                        </StackPanel>
+
+                        <StackPanel Visibility="{Binding HasSingleSelectedMarker, Converter={StaticResource BoolToVis}}">
+                            <TextBlock Text="Marker label" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
+                            <TextBox x:Name="MarkerLabelTextBox"
+                                     Text="{Binding SelectedMarkerLabel, UpdateSourceTrigger=LostFocus}"
+                                     KeyDown="DurationTextBox_KeyDown"
+                                     LostFocus="SidebarDurationTextBox_LostFocus"/>
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>

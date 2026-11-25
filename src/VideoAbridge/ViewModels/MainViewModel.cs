@@ -74,6 +74,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private double _startFadeCap;
     [ObservableProperty] private double _fadeToBlackSeconds;
     [ObservableProperty] private double _endFadeCap;
+    [ObservableProperty] private string _selectedMarkerLabel = "";
     private bool _syncingSidebarUi;
     [ObservableProperty] private bool _isPreviewMode;
     [ObservableProperty] private double _previewBlackoutOpacity;
@@ -101,6 +102,8 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     public bool HasSelectedJoin =>
         SelectedDeletedRunId is { } id
         && Timeline?.GetDeletedRuns().FirstOrDefault(r => r.Id == id) is { IsInterior: true, Join: not null };
+
+    public bool HasSingleSelectedMarker => SelectedMarkerIds.Count == 1;
 
     public AbridgedTimelineLayout? AbridgedLayout => _abridgedLayout;
 
@@ -179,6 +182,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     private void OnSelectedMarkerIdsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         NotifyTimelineActionCommands();
+        SyncSelectedMarkerLabelUi();
         RefreshStatusBar();
         _ = RefreshSelectionPreviewAsync();
     }
@@ -280,6 +284,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         if (_thumbnailRefreshSuspendCount == 0)
             _ = RefreshThumbnailsAsync();
         RefreshSelectionFromTimeline();
+        SyncSelectedMarkerLabelUi();
         SyncFocusFromPlayhead();
         RefreshStatusBar();
         _ = RefreshSelectionPreviewAsync();
@@ -1598,6 +1603,67 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     partial void OnFadeFromBlackSecondsChanged(double value) => CommitStartFade(value);
 
     partial void OnFadeToBlackSecondsChanged(double value) => CommitEndFade(value);
+
+    partial void OnSelectedMarkerLabelChanged(string value) => CommitMarkerLabel(value);
+
+    private void SyncSelectedMarkerLabelUi()
+    {
+        OnPropertyChanged(nameof(HasSingleSelectedMarker));
+        var label = "";
+        if (Timeline is not null && SelectedMarkerIds.Count == 1)
+        {
+            var id = SelectedMarkerIds[0];
+            var marker = Timeline.Markers.FirstOrDefault(m => m.Id == id);
+            if (marker is not null)
+                label = marker.Label;
+        }
+
+        if (SelectedMarkerLabel == label)
+            return;
+
+        _syncingSidebarUi = true;
+        try
+        {
+            SelectedMarkerLabel = label;
+        }
+        finally
+        {
+            _syncingSidebarUi = false;
+        }
+    }
+
+    private void CommitMarkerLabel(string value)
+    {
+        if (_syncingSidebarUi || Timeline is null || SelectedMarkerIds.Count != 1)
+            return;
+
+        var id = SelectedMarkerIds[0];
+        var normalized = string.IsNullOrWhiteSpace(value) ? "" : value.Trim();
+        var marker = Timeline.Markers.FirstOrDefault(m => m.Id == id);
+        if (marker is null)
+            return;
+
+        if (marker.Label == normalized)
+        {
+            if (SelectedMarkerLabel != normalized)
+            {
+                _syncingSidebarUi = true;
+                try { SelectedMarkerLabel = normalized; }
+                finally { _syncingSidebarUi = false; }
+            }
+
+            return;
+        }
+
+        if (SelectedMarkerLabel != normalized)
+        {
+            _syncingSidebarUi = true;
+            try { SelectedMarkerLabel = normalized; }
+            finally { _syncingSidebarUi = false; }
+        }
+
+        Apply(Timeline.SetMarkerLabel(id, normalized));
+    }
 
     private void CommitJoinCrossfade(double value)
     {

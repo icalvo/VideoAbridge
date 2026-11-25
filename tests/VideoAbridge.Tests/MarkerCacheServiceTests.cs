@@ -101,6 +101,34 @@ public class MarkerCacheServiceTests
     }
 
     [Fact]
+    public void SaveAndTryLoadRoundTripsMarkerLabels()
+    {
+        using var dir = new TempDir();
+        var video = dir.WriteFile("clip.bin", CreateBytes(200));
+        var duration = TimeSpan.FromSeconds(42);
+        var cache = new MarkerCacheService(Path.Combine(dir.Path, "MarkerCache"));
+
+        var set = AbridgedVersionSet.CreateDefault(duration).RequireOk();
+        set = set.ReplaceActiveTimeline(
+            set.ActiveTimeline
+                .AddMarker(TimeSpan.FromSeconds(10), MarkerSource.User).RequireOk()
+                .AddMarker(TimeSpan.FromSeconds(20), MarkerSource.User).RequireOk()).RequireOk();
+        var labeledId = set.ActiveTimeline.Markers[0].Id;
+        set = set.ReplaceActiveTimeline(
+            set.ActiveTimeline.SetMarkerLabel(labeledId, "Chapter 1").RequireOk()).RequireOk();
+
+        cache.SaveVersionSet(video, set);
+
+        var loaded = cache.TryLoadVersionSet(video, duration);
+        loaded.Should().NotBeNull();
+        loaded.ActiveTimeline.Markers[0].Label.Should().Be("Chapter 1");
+        loaded.ActiveTimeline.Markers[1].Label.Should().BeEmpty();
+
+        var text = File.ReadAllText(Directory.GetFiles(cache.CacheDirectory, "*.json").Single());
+        text.Should().Contain("\"label\": \"Chapter 1\"");
+    }
+
+    [Fact]
     public void SaveAndTryLoadPreservesVersionOrder()
     {
         using var dir = new TempDir();

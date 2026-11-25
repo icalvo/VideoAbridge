@@ -101,6 +101,34 @@ public class TimelineTests
     }
 
     [Fact]
+    public void SetMarkerLabelTrimsAndPreservesOnMove()
+    {
+        var timeline = CreateWithMarkers(10, 30, 50);
+        var id = timeline.Markers[1].Id;
+
+        timeline = timeline.SetMarkerLabel(id, "  Intro  ").RequireOk();
+        timeline.Markers[1].Label.Should().Be("Intro");
+
+        var same = timeline.SetMarkerLabel(id, "Intro").RequireOk();
+        same.Should().BeSameAs(timeline);
+
+        var cleared = timeline.SetMarkerLabel(id, "   ").RequireOk();
+        cleared.Markers[1].Label.Should().BeEmpty();
+
+        timeline = timeline.SetMarkerLabel(id, "Keep").RequireOk();
+        var moved = timeline.MoveMarker(id, TimeSpan.FromSeconds(40)).RequireOk();
+        moved.Markers[1].Label.Should().Be("Keep");
+    }
+
+    [Fact]
+    public void SetMarkerLabelFailsWhenNotFound()
+    {
+        var timeline = CreateWithMarkers(10);
+        var error = timeline.SetMarkerLabel(MarkerId.New(), "x").RequireError();
+        error.Code.Should().Be("MarkerNotFound");
+    }
+
+    [Fact]
     public void MoveMarkerUpdatesTimeWithinNeighborsAndPreservesId()
     {
         var timeline = CreateWithMarkers(10, 30, 50);

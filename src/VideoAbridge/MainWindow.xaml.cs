@@ -675,6 +675,12 @@ public partial class MainWindow : Window, IDisposable
                 return true;
             }
 
+            if (key is Key.Enter && _viewModel.HasSingleSelectedMarker)
+            {
+                FocusFadeTextBox(MarkerLabelTextBox);
+                return true;
+            }
+
             if (key is Key.Enter && _viewModel.HasSelectedJoin)
             {
                 FocusFadeTextBox(CrossfadeTextBox);

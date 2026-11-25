@@ -181,7 +181,7 @@
                     <TextBlock Grid.Row="7" Grid.Column="1" Text="Shift+S" Style="{StaticResource ShortcutKeys}"/>
                     <TextBlock Grid.Row="8" Grid.Column="0" Text="Shift-select item under playhead (Edit)" Style="{StaticResource ShortcutAction}"/>
                     <TextBlock Grid.Row="8" Grid.Column="1" Text="S" Style="{StaticResource ShortcutKeys}"/>
-                    <TextBlock Grid.Row="9" Grid.Column="0" Text="Edit crossfade (selected cut)" Style="{StaticResource ShortcutAction}"/>
+                    <TextBlock Grid.Row="9" Grid.Column="0" Text="Edit marker label (1 marker) or crossfade (cut)" Style="{StaticResource ShortcutAction}"/>
                     <TextBlock Grid.Row="9" Grid.Column="1" Text="Enter" Style="{StaticResource ShortcutKeys}"/>
                     <TextBlock Grid.Row="10" Grid.Column="0" Text="Edit start fade" Style="{StaticResource ShortcutAction}"/>
                     <TextBlock Grid.Row="10" Grid.Column="1" Text="Shift+Enter" Style="{StaticResource ShortcutKeys}"/>

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Marker labels: edit-mode timeline shows left-aligned labels in a top band (marker lines stay below it; width capped by the next labeled marker); sidebar field when one marker is selected; Enter focuses it; persisted with the marker cache.
 - Ctrl+Left/Right nudges the selection by the sticky move mode (1 frame / 1s / 10s): selected manual markers, or a cut’s delimiting manual markers. Disabled for Marker and Cut modes; warns with the reason when the nudge is blocked.
 
 ### Changed
@@ -19,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Timeline pane no longer shows darker bands above and below the track: surplus height is only under the timeline (scrollbar band) and matches the timeline color.
+- Timeline pane chrome uses one background: top space is the marker-label band; surplus under the track is the overlay scrollbar band (no darker strips).
 - Edit sidebar selection frames no longer flicker when the selection changes: previous frames stay until the new ones are ready, then replace in one update.
 
 ## [2026.11.9] - 2026-11-24

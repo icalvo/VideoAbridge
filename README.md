@@ -66,7 +66,7 @@ Open **Help → Keyboard shortcuts** (or press `?`) for a categorized list. Shor
 | Ctrl+D                | Detect Scenes                             |
 | E                     | Toggle Edit / Preview                     |
 | S / Shift+S           | Shift-click / Click item under playhead (Edit)|
-| Enter                 | Edit crossfade (selected cut, Edit)       |
+| Enter                 | Edit marker label (1 marker) or crossfade (cut, Edit) |
 | Shift+Enter           | Edit start fade (Edit)                    |
 | 2 / 3                 | Zoom in / out on playhead                 |
 | 1 / 0                 | Zoom to abridged content / Zoom to fit    |

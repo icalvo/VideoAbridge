@@ -86,6 +86,10 @@ public partial class TimelineControl : UserControl
 
     private static readonly Brush WaveformBrush = CreateFrozenBrush(0x99, 0x00, 0x00, 0x00);
     private static readonly Brush KeepDurationLabelBrush = CreateFrozenBrush(0x9A, 0x9A, 0x9E);
+    private static readonly Brush MarkerLabelBrush = CreateFrozenBrush(0xCC, 0xCC, 0xCC);
+    /// <summary>Exclusive top band for marker labels; marker lines start at this Y.</summary>
+    private const double MarkerLabelBandHeight = 18;
+    private const double MarkerLabelTop = 2;
     private static readonly Brush FocusTriangleBrightBrush = CreateFrozenBrush(0xFF, 0x33, 0x33);
     private static readonly Brush FocusTriangleDimBrush = CreateFrozenBrush(0x66, 0x14, 0x14);
     private static readonly Brush KeptSegmentBrush = CreateFrozenBrush(0x32, 0x6E, 0x46);
@@ -407,6 +411,13 @@ public partial class TimelineControl : UserControl
 
     private void OnControlSizeChanged(object sender, SizeChangedEventArgs e)
     {
+        if (e.HeightChanged && !e.WidthChanged)
+        {
+            SyncCanvasHeight();
+            UpdatePlayhead();
+            return;
+        }
+
         if (!e.WidthChanged)
             return;
 
@@ -467,8 +478,24 @@ public partial class TimelineControl : UserControl
     {
         RootCanvas.Width = width;
         RootCanvas.MinWidth = width;
+        SyncCanvasHeight();
         RootCanvas.InvalidateMeasure();
         Scroller.InvalidateScrollInfo();
+    }
+
+    private void SyncCanvasHeight()
+    {
+        var height = GetViewportHeight();
+        RootCanvas.Height = Math.Max(MinHeight > 1 ? MinHeight : 160, height > 1 ? height : 160);
+    }
+
+    private double GetViewportHeight()
+    {
+        if (Scroller.ViewportHeight > 1)
+            return Scroller.ViewportHeight;
+        if (ActualHeight > 1)
+            return ActualHeight;
+        return 160;
     }
 
     private double GetViewportWidth()
@@ -729,7 +756,7 @@ public partial class TimelineControl : UserControl
         _playheadLine = new Line
         {
             Y1 = 0,
-            Y2 = 160,
+            Y2 = RootCanvas.Height,
             Stroke = Brushes.White,
             StrokeThickness = 1,
             IsHitTestVisible = false
@@ -754,7 +781,9 @@ public partial class TimelineControl : UserControl
 
         var boundaries = timeline.GetBoundaries();
         var (keptRuns, deletedRuns) = timeline.GetKeptAndDeletedRuns();
-        const double trackTop = 70;
+        // Label band [0, MarkerLabelBandHeight) is exclusive of marker lines/thumbs.
+        const double thumbTop = MarkerLabelBandHeight + 2;
+        const double trackTop = 82;
         const double trackHeight = 36;
 
         for (var i = 0; i < timeline.Segments.Count; i++)
@@ -870,9 +899,9 @@ public partial class TimelineControl : UserControl
             if (showThumbs && thumbs.TryGetValue(marker.Id, out var thumb))
             {
                 if (thumb.BeforeImage is not null && spaceLeft >= thumbWidth + 4)
-                    AddThumb(thumb.BeforeImage, x - thumbWidth - 2, 8, thumbWidth, thumbHeight);
+                    AddThumb(thumb.BeforeImage, x - thumbWidth - 2, thumbTop, thumbWidth, thumbHeight);
                 if (thumb.AfterImage is not null && spaceRight >= thumbWidth + 4)
-                    AddThumb(thumb.AfterImage, x + 2, 8, thumbWidth, thumbHeight);
+                    AddThumb(thumb.AfterImage, x + 2, thumbTop, thumbWidth, thumbHeight);
             }
 
             var brush = MarkerBrush(marker.Source, isSelected);
@@ -880,7 +909,7 @@ public partial class TimelineControl : UserControl
             {
                 X1 = x,
                 X2 = x,
-                Y1 = 4,
+                Y1 = MarkerLabelBandHeight,
                 Y2 = trackTop + trackHeight,
                 Stroke = brush,
                 StrokeThickness = isSelected ? 3 : 2,
@@ -913,6 +942,35 @@ public partial class TimelineControl : UserControl
             };
             RootCanvas.Children.Add(handle);
 
+            if (!string.IsNullOrEmpty(marker.Label))
+            {
+                // Cap only by the next labeled marker (or timeline end), not unlabeled markers.
+                var labelCapX = timeline.Duration.TotalSeconds * pps;
+                for (var j = i + 1; j < timeline.Markers.Count; j++)
+                {
+                    if (string.IsNullOrEmpty(timeline.Markers[j].Label))
+                        continue;
+                    labelCapX = timeline.Markers[j].Time.TotalSeconds * pps;
+                    break;
+                }
+
+                var maxWidth = Math.Max(0, labelCapX - x - 4);
+                if (maxWidth >= 8)
+                {
+                    var markerLabel = new TextBlock
+                    {
+                        Text = marker.Label,
+                        Foreground = MarkerLabelBrush,
+                        FontSize = 11,
+                        MaxWidth = maxWidth,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                        IsHitTestVisible = false
+                    };
+                    Canvas.SetLeft(markerLabel, x);
+                    Canvas.SetTop(markerLabel, MarkerLabelTop);
+                    RootCanvas.Children.Add(markerLabel);
+                }
+            }
         }
 
         DrawEditFocusTriangle(timeline, pps, trackTop, trackHeight);
@@ -920,7 +978,7 @@ public partial class TimelineControl : UserControl
         _playheadLine = new Line
         {
             Y1 = 0,
-            Y2 = 160,
+            Y2 = RootCanvas.Height,
             Stroke = Brushes.White,
             StrokeThickness = 1,
             IsHitTestVisible = false
@@ -1323,6 +1381,7 @@ public partial class TimelineControl : UserControl
         var x = Playhead.TotalSeconds * Math.Max(MinPixelsPerSecond, PixelsPerSecond);
         _playheadLine.X1 = x;
         _playheadLine.X2 = x;
+        _playheadLine.Y2 = RootCanvas.Height;
     }
 
     private static readonly Brush SceneMarkerBrush = CreateFrozenBrush(0x6C, 0xA0, 0xDC);
