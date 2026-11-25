@@ -84,8 +84,9 @@ public readonly record struct PreviewVisualState(
                     PreviewComplete: false);
             }
 
-            // Crossfade tail of this clip.
-            if (outgoingXf > 0 && t >= soloEnd - eps && t < clipEnd - eps)
+            // Crossfade tail of this clip. Use a half-open [soloEnd, clipEnd) without carving off
+            // FrameEpsilon from the end — that aborted the dissolve one frame early and flickered.
+            if (outgoingXf > 0 && t >= soloEnd - eps && t < clipEnd)
             {
                 var u = (t - soloEnd) / outgoingXf;
                 u = Math.Clamp(u, 0, 1);
@@ -106,9 +107,12 @@ public readonly record struct PreviewVisualState(
             }
 
             // Deleted gap (or cut boundary): jump forward into the next kept section.
+            // After a crossfade, jump only once past clipEnd (the outgoing tail is done).
             // Critical: only when we have NOT already reached nextPlayable — otherwise a later
             // clip's playback would keep matching "past end of earlier clip" and snap back.
-            if (i + 1 < clips.Count && t >= soloEnd - eps && t < nextPlayable - eps)
+            var jumpAfter = outgoingXf > 0 ? clipEnd : soloEnd;
+            var jumpEps = outgoingXf > 0 ? 1e-9 : eps;
+            if (i + 1 < clips.Count && t >= jumpAfter - jumpEps && t < nextPlayable - eps)
             {
                 var jumpTo = TimeSpan.FromSeconds(nextPlayable);
                 return new PreviewVisualState(

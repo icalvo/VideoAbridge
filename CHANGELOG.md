@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preview Mode: dual bitmap compositor (two layers with per-frame opacities) drives crossfades and hard cuts—no HWND seek across the deleted gap—so dissolves scrub/play without flashing the cut frame; blackout/crossfade opacities update every source frame.
 - Timeline pane chrome uses one background: top space is the marker-label band; surplus under the track is the overlay scrollbar band (no darker strips).
 - Edit sidebar selection frames no longer flicker when the selection changes: previous frames stay until the new ones are ready, then replace in one update.
 

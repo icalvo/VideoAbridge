@@ -48,13 +48,20 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _selectionPreviewCts;
     private TimeSpan _selectionPreviewLeftSeek;
     private TimeSpan _selectionPreviewRightSeek;
-    private FrameVideoPlayer? _secondaryPlayer;
+    private FrameVideoPlayer? _previewLayerA;
+    private FrameVideoPlayer? _previewLayerB;
     private ExportPlan? _previewPlan;
     private PreviewTimeMap? _previewMap;
     private AbridgedTimelineLayout? _abridgedLayout;
     private TimeSpan? _seekGateTarget;
     private DateTime _seekGateUntilUtc;
-    private bool _inCrossfade;
+    /// <summary>When true, layer A is the outgoing/active solo layer; B is incoming during XF.</summary>
+    private bool _outgoingIsLayerA = true;
+    private bool _compositorInCrossfade;
+    private TimeSpan _lastCompositorOutgoingSeek = TimeSpan.MinValue;
+    private DispatcherTimer? _previewClockTimer;
+    private DateTime _compositorPlayOriginUtc;
+    private TimeSpan _compositorPlayOriginAbridged;
     private bool _committingVersionRename;
     private double _frameRate = 30;
     private PlayheadMoveMode _editMoveMode = PlayheadMoveMode.Marker;
@@ -77,9 +84,12 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _selectedMarkerLabel = "";
     private bool _syncingSidebarUi;
     [ObservableProperty] private bool _isPreviewMode;
+    [ObservableProperty] private double _previewBackdropOpacity;
     [ObservableProperty] private double _previewBlackoutOpacity;
-    [ObservableProperty] private double _previewSecondaryOpacity;
-    [ObservableProperty] private ImageSource? _previewSecondaryFrame;
+    [ObservableProperty] private double _previewLayerAOpacity;
+    [ObservableProperty] private ImageSource? _previewLayerAFrame;
+    [ObservableProperty] private double _previewLayerBOpacity;
+    [ObservableProperty] private ImageSource? _previewLayerBFrame;
     [ObservableProperty] private bool _hasSelectionPreview;
     [ObservableProperty] private ImageSource? _selectionPreviewLeftImage;
     [ObservableProperty] private ImageSource? _selectionPreviewRightImage;
@@ -162,7 +172,13 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         _player.TimeChanged += (_, time) =>
         {
             // BeginInvoke (not Invoke): LibVLC callbacks + UI-thread Seek otherwise deadlock.
-            Application.Current?.Dispatcher.BeginInvoke(() => HandlePlayerTime(time));
+            Application.Current?.Dispatcher.BeginInvoke(() =>
+            {
+                // Preview uses the dual-layer compositor clock; HWND time is Edit-only.
+                if (IsPreviewMode)
+                    return;
+                HandlePlayerTime(time);
+            });
         };
         _player.EndReached += (_, _) =>
         {
@@ -170,8 +186,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             {
                 if (!IsPlaying)
                     return;
-                _player.Pause();
-                IsPlaying = false;
+                PausePlayback();
             });
         };
         SelectedMarkerIds.CollectionChanged += OnSelectedMarkerIdsChanged;
@@ -300,6 +315,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(DisplayPlayhead));
         TogglePreviewModeCommand.NotifyCanExecuteChanged();
         SyncPlayheadMoveModeForPreview(enteringPreview: value);
+        SyncPreviewClockTimer();
         _ = RefreshSelectionPreviewAsync();
 
         if (_restoringUiFromCache)
@@ -432,7 +448,11 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         PersistMarkerCache(force: false);
     }
 
-    partial void OnIsPlayingChanged(bool value) => NotifyTimelineActionCommands();
+    partial void OnIsPlayingChanged(bool value)
+    {
+        NotifyTimelineActionCommands();
+        SyncPreviewClockTimer();
+    }
 
     /// <summary>Called by MainWindow when the timeline scrollbar moves.</summary>
     public void ReportTimelineVisibleStart(double visibleStartSeconds)
@@ -808,8 +828,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         // Prefer our flag: LibVLC IsPlaying can stay true after the first-frame pause.
         if (IsPlaying)
         {
-            _player.Pause();
-            IsPlaying = false;
+            PausePlayback();
             return;
         }
 
@@ -818,18 +837,25 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             if (_previewPlan is null || _previewMap is null)
                 return;
 
-            var abridged = _previewMap.ToAbridged(Playhead);
+            var abridged = AbridgedPlayhead;
             if (_previewMap.AbridgedDuration > TimeSpan.Zero
                 && abridged >= _previewMap.AbridgedDuration - Timeline.MarkerEpsilon)
             {
-                var kept = Timeline.GetKeptRuns();
-                var firstKept = kept.Count > 0 ? kept[0].Start : TimeSpan.Zero;
-                SeekPlayhead(firstKept);
+                SeekAbridgedPlayhead(TimeSpan.Zero);
             }
-            else if (!Timeline.IsKeptTime(Playhead))
+            else
             {
-                SeekPlayhead(Timeline.SnapToNearestKept(Playhead));
+                SeekAbridgedPlayhead(abridged);
             }
+
+            _compositorPlayOriginUtc = DateTime.UtcNow;
+            _compositorPlayOriginAbridged = AbridgedPlayhead;
+            IsPlaying = true;
+            SyncPreviewClockTimer();
+            ApplyCompositor(
+                PreviewSeekState.FromAbridged(_previewPlan, _previewMap, AbridgedPlayhead),
+                play: true);
+            return;
         }
 
         _player.Play();
@@ -1218,8 +1244,56 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         if (!IsPlaying)
             return;
+        PausePlayback();
+    }
+
+    private void PausePlayback()
+    {
         _player.Pause();
+        TryLayerPause(_previewLayerA);
+        TryLayerPause(_previewLayerB);
         IsPlaying = false;
+        SyncPreviewClockTimer();
+    }
+
+    private static void TryLayerPause(FrameVideoPlayer? layer)
+    {
+        try
+        {
+            layer?.Pause();
+        }
+        catch (ObjectDisposedException)
+        {
+            // ignore teardown races
+        }
+        catch (InvalidOperationException)
+        {
+            // ignore teardown races
+        }
+        catch (COMException)
+        {
+            // ignore teardown races
+        }
+    }
+
+    private static void TryLayerPlay(FrameVideoPlayer? layer)
+    {
+        try
+        {
+            layer?.Play();
+        }
+        catch (ObjectDisposedException)
+        {
+            // ignore teardown races
+        }
+        catch (InvalidOperationException)
+        {
+            // ignore teardown races
+        }
+        catch (COMException)
+        {
+            // ignore teardown races
+        }
     }
 
     private List<(TimelineItemId Id, TimeSpan Time)> BuildMarkerLane()
@@ -1880,22 +1954,25 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public void SeekPlayhead(TimeSpan time)
     {
-        if (Timeline is not null && IsPreviewMode)
-            time = Timeline.SnapToNearestKept(time);
+        if (IsPreviewMode && _previewMap is not null)
+        {
+            // Preview transport is abridged-clock; map kept source times into the compositor.
+            if (Timeline is not null)
+                time = Timeline.SnapToNearestKept(time);
+            SeekAbridgedPlayhead(_previewMap.ToAbridged(time));
+            return;
+        }
 
         Playhead = time;
         SyncAbridgedPlayheadFromSource(time);
-        EndCrossfadeVisuals();
         GateSeek(time);
         _player.Seek(time);
-        if (IsPreviewMode)
-            ApplyPreviewVisuals(time);
     }
 
     /// <summary>Preview timeline seek: <paramref name="abridged"/> is export-clock time.</summary>
     public void SeekAbridgedPlayhead(TimeSpan abridged)
     {
-        if (_previewMap is null || Timeline is null)
+        if (_previewMap is null || _previewPlan is null || Timeline is null)
             return;
 
         if (abridged < TimeSpan.Zero)
@@ -1903,9 +1980,16 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         else if (abridged > _previewMap.AbridgedDuration)
             abridged = _previewMap.AbridgedDuration;
 
-        AbridgedPlayhead = abridged;
-        var source = _previewMap.ToSource(abridged);
-        SeekPlayhead(source);
+        var seek = PreviewSeekState.FromAbridged(_previewPlan, _previewMap, abridged);
+        AbridgedPlayhead = seek.AbridgedTime;
+        Playhead = seek.PlayheadSourceTime;
+        if (IsPlaying)
+        {
+            _compositorPlayOriginUtc = DateTime.UtcNow;
+            _compositorPlayOriginAbridged = seek.AbridgedTime;
+        }
+
+        ApplyCompositor(seek, play: IsPlaying);
     }
 
     private void SyncAbridgedPlayheadFromSource(TimeSpan sourceTime)
@@ -1915,104 +1999,10 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         AbridgedPlayhead = _previewMap.ToAbridged(sourceTime);
     }
 
+    /// <summary>Edit-mode HWND playhead only. Preview is driven by <see cref="OnPreviewClockTick"/>.</summary>
     private void HandlePlayerTime(TimeSpan time)
     {
-        if (Timeline is null || !IsPreviewMode || _previewPlan is null || _previewMap is null)
-        {
-            Playhead = time;
-            return;
-        }
-
-        var frameEps = TimeSpan.FromSeconds(PreviewVisualState.FrameEpsilonSeconds);
-
-        if (_seekGateTarget is { } gate)
-        {
-            // Arrived near the jump target — release the gate and continue.
-            if (AbsDiff(time, gate) <= frameEps * 2)
-            {
-                _seekGateTarget = null;
-            }
-            else if (DateTime.UtcNow < _seekGateUntilUtc)
-            {
-                // Keep the needle stable while LibVLC finishes the jump; do not re-seek.
-                Playhead = gate;
-                SyncAbridgedPlayheadFromSource(gate);
-                return;
-            }
-            else
-            {
-                // Seek timed out and we're still not there — retry once rather than
-                // falling through into another Evaluate→Jump loop on stale gap times.
-                GateSeek(gate);
-                Playhead = gate;
-                SyncAbridgedPlayheadFromSource(gate);
-                _player.Seek(gate);
-                return;
-            }
-        }
-
-        var state = PreviewVisualState.Evaluate(_previewPlan, _previewMap, time);
-        Playhead = state.PlayheadSourceTime;
-        SyncAbridgedPlayheadFromSource(state.PlayheadSourceTime);
-        PreviewBlackoutOpacity = state.BlackoutOpacity;
-
-        if (state.JumpPrimaryTo is { } jump)
-        {
-            // Already seeking to (approximately) this target — don't flood LibVLC.
-            if (_seekGateTarget is { } active
-                && AbsDiff(active, jump) <= frameEps)
-            {
-                Playhead = active;
-                SyncAbridgedPlayheadFromSource(active);
-                return;
-            }
-
-            EndCrossfadeVisuals();
-            GateSeek(jump);
-            Playhead = jump;
-            SyncAbridgedPlayheadFromSource(jump);
-            _player.Seek(jump);
-            ApplyVolumes(state.BlackoutOpacity, incomingOpacity: 0);
-            if (state.PreviewComplete && IsPlaying)
-            {
-                _player.Pause();
-                IsPlaying = false;
-            }
-
-            return;
-        }
-
-        if (state.PreviewComplete)
-        {
-            EndCrossfadeVisuals();
-            ApplyVolumes(state.BlackoutOpacity, 0);
-            if (IsPlaying)
-            {
-                _player.Pause();
-                IsPlaying = false;
-            }
-
-            return;
-        }
-
-        if (state.InCrossfade)
-        {
-            if (!_inCrossfade)
-            {
-                // Start the incoming clip once; let it run for the blend window.
-                EnsureSecondaryAt(state.IncomingSourceTime, play: IsPlaying);
-                _inCrossfade = true;
-            }
-
-            PreviewSecondaryOpacity = state.IncomingOpacity;
-            ApplyVolumes(state.BlackoutOpacity, state.IncomingOpacity);
-        }
-        else
-        {
-            if (_inCrossfade)
-                EndCrossfadeVisuals();
-            ApplyVolumes(state.BlackoutOpacity, 0);
-        }
+        Playhead = time;
     }
 
     private void EnterRealtimePreview(bool restoreSavedView)
@@ -2024,15 +2014,14 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         if (IsPlaying)
-        {
-            _player.Pause();
-            IsPlaying = false;
-        }
+            PausePlayback();
 
-        // Ensure we are on the source file (not a leftover temp render).
+        // Keep HWND loaded (Edit return) but mute/cover it; Preview paints dual bitmaps.
         try
         {
             _player.Load(VideoPath);
+            _player.SetVolume(0);
+            _player.Pause();
         }
         catch (InvalidOperationException ex)
         {
@@ -2059,17 +2048,15 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // Rebuild secondary against the current source path.
-        _secondaryPlayer?.Dispose();
-        _secondaryPlayer = null;
-        PreviewSecondaryFrame = null;
-        EnsureSecondaryPlayer();
+        DisposePreviewLayers();
+        PreviewBackdropOpacity = 1;
+        EnsurePreviewLayers();
         RefreshRealtimePreviewModel(seekToPlayhead: !restoreSavedView);
     }
 
     private void ExitRealtimePreview()
     {
-        EndCrossfadeVisuals();
+        DisposePreviewLayers();
         _previewPlan = null;
         _previewMap = null;
         _abridgedLayout = null;
@@ -2077,9 +2064,17 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(PreviewExportPlan));
         OnPropertyChanged(nameof(PreviewTimeMap));
         _seekGateTarget = null;
+        _compositorInCrossfade = false;
+        _lastCompositorOutgoingSeek = TimeSpan.MinValue;
+        _outgoingIsLayerA = true;
+        PreviewBackdropOpacity = 0;
         PreviewBlackoutOpacity = 0;
-        PreviewSecondaryOpacity = 0;
+        PreviewLayerAOpacity = 0;
+        PreviewLayerBOpacity = 0;
+        PreviewLayerAFrame = null;
+        PreviewLayerBFrame = null;
         _player.SetVolume(100);
+        SyncPreviewClockTimer();
         RefreshStatusBar();
     }
 
@@ -2104,120 +2099,228 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(AbridgedLayout));
         OnPropertyChanged(nameof(PreviewExportPlan));
         OnPropertyChanged(nameof(PreviewTimeMap));
-        EndCrossfadeVisuals();
+        _compositorInCrossfade = false;
+        _lastCompositorOutgoingSeek = TimeSpan.MinValue;
+        _outgoingIsLayerA = true;
 
         if (seekToPlayhead)
         {
             var snapped = Timeline.SnapToNearestKept(Playhead);
-            Playhead = snapped;
-            SyncAbridgedPlayheadFromSource(snapped);
-            GateSeek(snapped);
-            _player.Seek(snapped);
-            ApplyPreviewVisuals(snapped);
+            SeekAbridgedPlayhead(_previewMap.ToAbridged(snapped));
         }
-        else if (_previewMap is not null)
+        else
         {
-            ApplyPreviewVisuals(Playhead);
+            SeekAbridgedPlayhead(AbridgedPlayhead);
         }
     }
 
-    private void ApplyPreviewVisuals(TimeSpan sourceTime)
+    /// <summary>
+    /// Dual bitmap compositor: outgoing at (1−u), incoming at u. No visible layer ever seeks
+    /// across a deleted gap — hard cuts swap to a pre-parked idle layer; XF ends by fading.
+    /// </summary>
+    private void ApplyCompositor(PreviewSeekState seek, bool play)
     {
-        if (_previewPlan is null || _previewMap is null)
+        EnsurePreviewLayers();
+        if (_previewLayerA is not { } layerA || _previewLayerB is not { } layerB)
             return;
 
-        var state = PreviewVisualState.Evaluate(_previewPlan, _previewMap, sourceTime);
-        PreviewBlackoutOpacity = state.BlackoutOpacity;
-        PreviewSecondaryOpacity = 0;
-        ApplyVolumes(state.BlackoutOpacity, 0);
+        PreviewBlackoutOpacity = seek.BlackoutOpacity;
+        var audible = Math.Clamp(1.0 - seek.BlackoutOpacity, 0, 1);
+
+        if (seek.InCrossfade)
+        {
+            var outgoing = _outgoingIsLayerA ? layerA : layerB;
+            var incoming = _outgoingIsLayerA ? layerB : layerA;
+            SeekLayer(outgoing, seek.PrimarySourceTime);
+            SeekLayer(incoming, seek.IncomingSourceTime);
+            SetLayerOpacity(isLayerA: _outgoingIsLayerA, 1.0 - seek.IncomingOpacity);
+            SetLayerOpacity(isLayerA: !_outgoingIsLayerA, seek.IncomingOpacity);
+            outgoing.SetVolume((int)Math.Round(100 * audible * (1.0 - seek.IncomingOpacity)));
+            incoming.SetVolume((int)Math.Round(100 * audible * seek.IncomingOpacity));
+            if (play)
+            {
+                TryLayerPlay(outgoing);
+                TryLayerPlay(incoming);
+            }
+            else
+            {
+                TryLayerPause(outgoing);
+                TryLayerPause(incoming);
+            }
+
+            _compositorInCrossfade = true;
+            _lastCompositorOutgoingSeek = seek.PrimarySourceTime;
+            return;
+        }
+
+        // Solo (or hard cut): one visible layer at opacity 1.
+        if (_compositorInCrossfade)
+        {
+            // XF just ended — promote the incoming layer (already on the next clip) to active.
+            _outgoingIsLayerA = !_outgoingIsLayerA;
+            _compositorInCrossfade = false;
+        }
+        else if (_lastCompositorOutgoingSeek != TimeSpan.MinValue
+                 && AbsDiff(seek.PrimarySourceTime, _lastCompositorOutgoingSeek) > TimeSpan.FromSeconds(0.25))
+        {
+            // Hard cut / large teleport: park on the idle layer, then swap — never seek the
+            // visible surface across the deleted gap.
+            var wasOutgoingA = _outgoingIsLayerA;
+            var idle = wasOutgoingA ? layerB : layerA;
+            var oldOutgoing = wasOutgoingA ? layerA : layerB;
+            SeekLayer(idle, seek.PrimarySourceTime);
+            SetLayerOpacity(isLayerA: !wasOutgoingA, 1);
+            SetLayerOpacity(isLayerA: wasOutgoingA, 0);
+            TryLayerPause(oldOutgoing);
+            oldOutgoing.SetVolume(0);
+            idle.SetVolume((int)Math.Round(100 * audible));
+            _outgoingIsLayerA = !wasOutgoingA;
+            if (play)
+                TryLayerPlay(idle);
+            else
+                TryLayerPause(idle);
+
+            _lastCompositorOutgoingSeek = seek.PrimarySourceTime;
+            return;
+        }
+
+        var active = _outgoingIsLayerA ? layerA : layerB;
+        var other = _outgoingIsLayerA ? layerB : layerA;
+        SeekLayer(active, seek.PrimarySourceTime);
+        SetLayerOpacity(isLayerA: _outgoingIsLayerA, 1);
+        SetLayerOpacity(isLayerA: !_outgoingIsLayerA, 0);
+        active.SetVolume((int)Math.Round(100 * audible));
+        other.SetVolume(0);
+        TryLayerPause(other);
+        if (play)
+            TryLayerPlay(active);
+        else
+            TryLayerPause(active);
+
+        _lastCompositorOutgoingSeek = seek.PrimarySourceTime;
     }
 
-    private void EnsureSecondaryPlayer()
+    private void SetLayerOpacity(bool isLayerA, double opacity)
     {
-        if (_secondaryPlayer is not null || VideoPath is null)
+        opacity = Math.Clamp(opacity, 0, 1);
+        if (isLayerA)
+            PreviewLayerAOpacity = opacity;
+        else
+            PreviewLayerBOpacity = opacity;
+    }
+
+    private static void SeekLayer(FrameVideoPlayer layer, TimeSpan sourceTime) =>
+        layer.Seek(sourceTime);
+
+    private void EnsurePreviewLayers()
+    {
+        if (VideoPath is null)
             return;
 
         var dispatcher = Application.Current?.Dispatcher;
         if (dispatcher is null)
             return;
 
-        _secondaryPlayer = new FrameVideoPlayer(dispatcher);
-        _secondaryPlayer.FrameUpdated += (_, _) =>
-        {
-            PreviewSecondaryFrame = _secondaryPlayer.Bitmap;
-        };
+        var path = VideoPath;
+        _previewLayerA ??= CreatePreviewLayer(dispatcher, path, onFrame: bmp => PreviewLayerAFrame = bmp, ReportError);
+        _previewLayerB ??= CreatePreviewLayer(dispatcher, path, onFrame: bmp => PreviewLayerBFrame = bmp, ReportError);
+        PreviewLayerAFrame ??= _previewLayerA.Bitmap;
+        PreviewLayerBFrame ??= _previewLayerB.Bitmap;
+    }
+
+    private static FrameVideoPlayer CreatePreviewLayer(
+        Dispatcher dispatcher,
+        string path,
+        Action<ImageSource?> onFrame,
+        Action<string> reportError)
+    {
+        var layer = new FrameVideoPlayer(dispatcher);
+        layer.FrameUpdated += (_, _) => onFrame(layer.Bitmap);
         try
         {
-            _secondaryPlayer.Load(VideoPath);
-            _secondaryPlayer.SetVolume(0);
+            layer.Load(path);
+            layer.SetVolume(0);
         }
         catch (InvalidOperationException ex)
         {
-            ReportError($"Preview secondary player failed: {ex.Message}");
+            reportError($"Preview layer failed: {ex.Message}");
         }
         catch (ArgumentException ex)
         {
-            ReportError($"Preview secondary player failed: {ex.Message}");
+            reportError($"Preview layer failed: {ex.Message}");
         }
         catch (IOException ex)
         {
-            ReportError($"Preview secondary player failed: {ex.Message}");
+            reportError($"Preview layer failed: {ex.Message}");
         }
         catch (UnauthorizedAccessException ex)
         {
-            ReportError($"Preview secondary player failed: {ex.Message}");
+            reportError($"Preview layer failed: {ex.Message}");
         }
         catch (COMException ex)
         {
-            ReportError($"Preview secondary player failed: {ex.Message}");
+            reportError($"Preview layer failed: {ex.Message}");
         }
+
+        return layer;
     }
 
-    private void EnsureSecondaryAt(TimeSpan sourceTime, bool play)
+    private void DisposePreviewLayers()
     {
-        EnsureSecondaryPlayer();
-        if (_secondaryPlayer is null)
+        TryLayerPause(_previewLayerA);
+        TryLayerPause(_previewLayerB);
+        _previewLayerA?.Dispose();
+        _previewLayerB?.Dispose();
+        _previewLayerA = null;
+        _previewLayerB = null;
+    }
+
+    private void SyncPreviewClockTimer()
+    {
+        _previewClockTimer ??= CreatePreviewClockTimer();
+        var fps = _frameRate > 1e-6 ? _frameRate : 30;
+        var hz = Math.Clamp(fps, 24, 60);
+        _previewClockTimer.Interval = TimeSpan.FromSeconds(1.0 / hz);
+
+        var run = IsPreviewMode && IsPlaying;
+        if (run)
+            _previewClockTimer.Start();
+        else
+            _previewClockTimer.Stop();
+    }
+
+    private DispatcherTimer CreatePreviewClockTimer()
+    {
+        var timer = new DispatcherTimer(DispatcherPriority.Render)
+        {
+            Interval = TimeSpan.FromSeconds(1.0 / 30),
+        };
+        timer.Tick += OnPreviewClockTick;
+        return timer;
+    }
+
+    private void OnPreviewClockTick(object? sender, EventArgs e)
+    {
+        if (!IsPreviewMode || !IsPlaying || _previewPlan is null || _previewMap is null)
             return;
 
-        PreviewSecondaryFrame ??= _secondaryPlayer.Bitmap;
+        var elapsed = DateTime.UtcNow - _compositorPlayOriginUtc;
+        var abridged = _compositorPlayOriginAbridged + elapsed;
+        if (abridged >= _previewMap.AbridgedDuration)
+        {
+            abridged = _previewMap.AbridgedDuration;
+            var end = PreviewSeekState.FromAbridged(_previewPlan, _previewMap, abridged);
+            AbridgedPlayhead = end.AbridgedTime;
+            Playhead = end.PlayheadSourceTime;
+            ApplyCompositor(end, play: false);
+            PausePlayback();
+            return;
+        }
 
-        _secondaryPlayer.Seek(sourceTime);
-        if (play)
-            _secondaryPlayer.Play();
-        else
-            _secondaryPlayer.Pause();
-    }
-
-    private void EndCrossfadeVisuals()
-    {
-        _inCrossfade = false;
-        PreviewSecondaryOpacity = 0;
-        try
-        {
-            _secondaryPlayer?.Pause();
-            _secondaryPlayer?.SetVolume(0);
-        }
-        catch (ObjectDisposedException)
-        {
-            // ignore teardown races
-        }
-        catch (InvalidOperationException)
-        {
-            // ignore teardown races
-        }
-        catch (COMException)
-        {
-            // ignore teardown races
-        }
-    }
-
-    private void ApplyVolumes(double blackoutOpacity, double incomingOpacity)
-    {
-        var audible = Math.Clamp(1.0 - blackoutOpacity, 0, 1);
-        var primary = (int)Math.Round(100 * audible * (1.0 - incomingOpacity));
-        var secondary = (int)Math.Round(100 * audible * incomingOpacity);
-        _player.SetVolume(primary);
-        _secondaryPlayer?.SetVolume(secondary);
+        var seek = PreviewSeekState.FromAbridged(_previewPlan, _previewMap, abridged);
+        AbridgedPlayhead = seek.AbridgedTime;
+        Playhead = seek.PlayheadSourceTime;
+        ApplyCompositor(seek, play: true);
     }
 
     private void GateSeek(TimeSpan target)
@@ -2822,6 +2925,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
             var info = await _probe.ProbeAsync(fullPath).ConfigureAwait(true);
             duration = info.Duration;
             _frameRate = info.FrameRate > 1e-6 ? info.FrameRate : 30;
+            SyncPreviewClockTimer();
             VideoPath = fullPath;
             _player.Load(fullPath);
             IsPlaying = false;
@@ -3528,9 +3632,14 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
                 _selectionPreviewCts = null;
             }
 
-            EndCrossfadeVisuals();
-            _secondaryPlayer?.Dispose();
-            _secondaryPlayer = null;
+            if (_previewClockTimer is not null)
+            {
+                _previewClockTimer.Stop();
+                _previewClockTimer.Tick -= OnPreviewClockTick;
+                _previewClockTimer = null;
+            }
+
+            DisposePreviewLayers();
 
             if (_exportCts is not null)
             {

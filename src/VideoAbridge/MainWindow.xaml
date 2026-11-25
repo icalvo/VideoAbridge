@@ -604,9 +604,17 @@
                           MouseEnter="PreviewHost_MouseEnter"
                           MouseLeave="PreviewHost_MouseLeave"
                           MouseMove="PreviewHost_MouseMove">
-                        <Image Source="{Binding PreviewSecondaryFrame}"
+                        <!-- Preview: dual bitmap layers (covers HWND). Edit: opacities stay 0 so HWND shows. -->
+                        <Rectangle Fill="Black"
+                                   Opacity="{Binding PreviewBackdropOpacity}"
+                                   IsHitTestVisible="False"/>
+                        <Image Source="{Binding PreviewLayerAFrame}"
                                Stretch="Uniform"
-                               Opacity="{Binding PreviewSecondaryOpacity}"
+                               Opacity="{Binding PreviewLayerAOpacity}"
+                               IsHitTestVisible="False"/>
+                        <Image Source="{Binding PreviewLayerBFrame}"
+                               Stretch="Uniform"
+                               Opacity="{Binding PreviewLayerBOpacity}"
                                IsHitTestVisible="False"/>
                         <Rectangle Fill="Black"
                                    Opacity="{Binding PreviewBlackoutOpacity}"

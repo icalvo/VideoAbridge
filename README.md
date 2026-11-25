@@ -28,7 +28,7 @@ VideoAbridge is not a general [NLE](https://en.wikipedia.org/wiki/Non-linear_edi
 ### Preview & playback
 
 - **LibVLC** playback of the source file with playhead sync to the timeline
-- **Edit vs Preview mode** — Edit shows the full source with deleted ranges; Preview shows the abridged timeline (kept sections only) with blackout / crossfade visuals approximating the export
+- **Edit vs Preview mode** — Edit shows the full source with deleted ranges; Preview shows the abridged timeline (kept sections only) with a dual-layer bitmap compositor for blackout / crossfade (approximating the export)
 - Marker **thumbnails** along the timeline
 
 ### Timeline navigation

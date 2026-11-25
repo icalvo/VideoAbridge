@@ -43,4 +43,32 @@ public class PreviewVisualStateTests
         var state = PreviewVisualState.Evaluate(plan, map, TimeSpan.FromSeconds(9.99));
         state.JumpPrimaryTo.Should().Be(TimeSpan.FromSeconds(20));
     }
+
+    private static (ExportPlan Plan, PreviewTimeMap Map) CrossfadePlan()
+    {
+        var plan = new ExportPlan(
+            [
+                new TimeRange(TimeSpan.FromSeconds(0), TimeSpan.FromSeconds(10)),
+                new TimeRange(TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(30))
+            ],
+            [new ExportJoin(TransitionMode.Crossfade, TimeSpan.FromSeconds(2))],
+            FadeFromBlackSeconds: null,
+            FadeToBlackSeconds: null);
+        return (plan, PreviewTimeMap.FromPlan(plan));
+    }
+
+    [Fact]
+    public void EvaluateCrossfadeCoversFullOutgoingTail()
+    {
+        var (plan, map) = CrossfadePlan();
+        // Last moments of outgoing tail (clipEnd=10) must stay in XF — not jump early.
+        var nearEnd = PreviewVisualState.Evaluate(plan, map, TimeSpan.FromSeconds(9.99));
+        nearEnd.InCrossfade.Should().BeTrue();
+        nearEnd.JumpPrimaryTo.Should().BeNull();
+        nearEnd.IncomingOpacity.Should().BeApproximately(0.995, 1e-3);
+
+        var atEnd = PreviewVisualState.Evaluate(plan, map, TimeSpan.FromSeconds(10));
+        atEnd.InCrossfade.Should().BeFalse();
+        atEnd.JumpPrimaryTo.Should().Be(TimeSpan.FromSeconds(22));
+    }
 }

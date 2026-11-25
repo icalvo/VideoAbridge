@@ -135,6 +135,44 @@ internal sealed class FrameVideoPlayer : IDisposable
         }
     }
 
+    /// <summary>Current media time, or false if the player is not ready.</summary>
+    public bool TryGetTime(out TimeSpan time)
+    {
+        try
+        {
+            if (_mediaPlayer is null)
+            {
+                time = default;
+                return false;
+            }
+
+            var ms = _mediaPlayer.Time;
+            if (ms < 0)
+            {
+                time = default;
+                return false;
+            }
+
+            time = TimeSpan.FromMilliseconds(ms);
+            return true;
+        }
+        catch (ObjectDisposedException)
+        {
+            time = default;
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            time = default;
+            return false;
+        }
+        catch (COMException)
+        {
+            time = default;
+            return false;
+        }
+    }
+
     private VlcMediaPlayer EnsurePlayer()
     {
         _mediaPlayer ??= new VlcMediaPlayer(_libVlc);
